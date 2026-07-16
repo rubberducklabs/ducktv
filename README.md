@@ -16,12 +16,13 @@ The app lists channels and EPG data from TVHeadend, starts a shared on-the-fly F
 
 ## Requirements
 
-- Docker + Dev Containers (recommended), or Elixir 1.17+, Erlang/OTP 27+, PostgreSQL 16, FFmpeg
+- Docker + Dev Containers (recommended), or Elixir 1.17+, Erlang/OTP 27+, FFmpeg
 - Network access to a TVHeadend server
+- No database required in v1
 
 ## Deploy on Unraid (no docker-compose)
 
-Uses plain `docker` commands via `scripts/unraid.sh` — works with Unraid’s Docker tab / terminal.
+Single container (app + FFmpeg). Uses plain `docker` via `scripts/unraid.sh`.
 
 1. Put this project on the server, e.g. `/mnt/user/appdata/tvplayer`.
 2. In a terminal on Unraid:
@@ -51,31 +52,39 @@ Useful commands:
 ./scripts/unraid.sh status
 ```
 
-That creates two containers on a shared network `tvplayer-net`:
-
-| Container | Image | Role |
-| --- | --- | --- |
-| `tvplayer-db` | `postgres:16-alpine` | Database |
-| `tvplayer` | `tvplayer:latest` (built locally) | App + FFmpeg |
-
-Volumes: `tvplayer-postgres` (DB), `tvplayer-hls` (HLS under `/data/hls`).
+Creates one container: `tvplayer` (`tvplayer:latest`) with volume `tvplayer-hls` → `/data/hls`.
 
 ### Unraid Docker UI (optional)
 
-After `./scripts/unraid.sh build`, you can manage the containers from **Docker** in the Unraid UI. Or add them manually with the same env vars as in `.env.example` — important ones:
+After `./scripts/unraid.sh build`, Repository must be `tvplayer:latest` (not a GitHub URL). Set:
 
-- Network: custom bridge `tvplayer-net` (create once)
-- App port: `4000` → `4000`
-- App volume: host path or named volume → `/data/hls`
-- `DATABASE_URL=ecto://postgres:postgres@tvplayer-db/tvplayer` (host = DB container name)
-- `SECRET_KEY_BASE`, `PHX_HOST`, `TVHEADEND_URL`, `TVHEADEND_USER`, `TVHEADEND_PASSWORD`
+- Port: `4000` → `4000` (or use `br0` with its own IP)
+- Volume: named/host path → `/data/hls`
+- Env: `SECRET_KEY_BASE`, `PHX_HOST`, `TVHEADEND_URL`, `TVHEADEND_USER`, `TVHEADEND_PASSWORD`
 
-`docker-compose.yml` is optional and only needed if you install a Compose plugin later.
+Example `docker run` (after build):
+
+```bash
+docker run -d \
+  --name=ducktv \
+  --net=br0 \
+  --ip=10.0.1.11 \
+  -e TZ=America/Los_Angeles \
+  -e SECRET_KEY_BASE='...' \
+  -e PHX_HOST=10.0.1.11 \
+  -e PHX_SCHEME=http \
+  -e TVHEADEND_URL=http://10.0.1.10:9981 \
+  -e TVHEADEND_USER=admin \
+  -e TVHEADEND_PASSWORD=admin \
+  -e HLS_ROOT=/data/hls \
+  -v tvplayer-hls:/data/hls \
+  tvplayer:latest
+```
 
 ## Quick start (Dev Container)
 
 1. Open this folder in VS Code / Cursor and **Reopen in Container**.
-2. The post-create script runs `mix phx.new` (if needed), fetches deps, and prepares Postgres.
+2. The post-create script fetches deps and prepares the workspace.
 3. Copy environment defaults:
 
 ```bash
@@ -86,7 +95,6 @@ cp .env.example .env
 5. Start the app:
 
 ```bash
-mix ecto.create
 mix phx.server
 ```
 
@@ -113,7 +121,7 @@ mix phx.server
 
 ## Architecture notes
 
-- TVHeadend remains the source of truth; no app tables are required in v1 (Postgres/Ecto UUID scaffolding is present for later).
+- TVHeadend is the source of truth; no database in v1 (Ecto scaffolding kept dormant for later).
 - One OTP session per channel reuses a single FFmpeg process across viewers.
 - Phoenix serves `/hls/:channel_uuid/*` playlists and segments.
 - Media runners implement `Tvplayer.Streams.Runner` so a Membrane pipeline can replace FFmpeg later.
@@ -136,5 +144,3 @@ TVH_INTEGRATION=1 mix test --only integration
 - **High CPU** — reduce `HOT_CHANNELS`, lower `STREAM_MAX_CONCURRENT`, or use a faster machine; H.264 sources remux at near-zero CPU (`STREAM_COPY=auto`), while `veryfast` still costs ~1 core per active MPEG-2/HEVC channel.
 - **No icons** — icons are proxied via `/icons/...` from TVHeadend `imagecache` paths.
 - **LAN access** — bind is `0.0.0.0:4000` in dev; ensure the client can reach both Phoenix and that TVHeadend allows the app host.
-# ducktv
-# ducktv

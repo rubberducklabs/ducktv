@@ -10,7 +10,8 @@ import Config
 config :elixir, :time_zone_database, Tz.TimeZoneDatabase
 
 config :tvplayer,
-  ecto_repos: [Tvplayer.Repo],
+  # No database in v1 — TVHeadend is the source of truth. Re-add ecto_repos when needed.
+  ecto_repos: [],
   generators: [timestamp_type: :utc_datetime, binary_id: true],
   tvheadend: [
     url: "http://10.0.1.10:9981",

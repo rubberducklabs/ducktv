@@ -3,15 +3,11 @@
   "dockerComposeFile": "compose.yaml",
   "service": "app",
   "workspaceFolder": "/workspace",
-  "forwardPorts": [4000, 5432],
+  "forwardPorts": [4000],
   "portsAttributes": {
     "4000": {
       "label": "Phoenix",
       "onAutoForward": "notify"
-    },
-    "5432": {
-      "label": "PostgreSQL",
-      "onAutoForward": "silent"
     }
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh",

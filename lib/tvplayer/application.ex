@@ -18,7 +18,6 @@ defmodule Tvplayer.Application do
 
     children = [
       TvplayerWeb.Telemetry,
-      Tvplayer.Repo,
       {DNSCluster, query: Application.get_env(:tvplayer, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Tvplayer.PubSub},
       Tvplayer.Tvheadend.Cache,
