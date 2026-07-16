@@ -1,0 +1,73 @@
+# Unraid / Docker Compose stack for TV Player.
+# Same runtime config as the local .env / devcontainer setup.
+#
+# 1. Copy env defaults:  cp .env.example .env
+# 2. Set SECRET_KEY_BASE (mix phx.gen.secret) and your Unraid host in PHX_HOST
+# 3. Build & start:      docker compose up -d --build
+# 4. Open:               http://<unraid-ip>:4000
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-tvplayer}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tvplayer:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${PORT:-4000}:4000"
+    volumes:
+      - hls-data:/data/hls
+    environment:
+      # Phoenix
+      PHX_SERVER: "true"
+      PORT: ${PORT:-4000}
+      PHX_HOST: ${PHX_HOST:-localhost}
+      PHX_SCHEME: ${PHX_SCHEME:-http}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Set SECRET_KEY_BASE in .env — run: mix phx.gen.secret}
+      DATABASE_URL: ${DATABASE_URL:-ecto://postgres:postgres@db/tvplayer}
+      POOL_SIZE: ${POOL_SIZE:-10}
+
+      # TVHeadend (same defaults as local .env)
+      TVHEADEND_URL: ${TVHEADEND_URL:-http://10.0.1.10:9981}
+      TVHEADEND_USER: ${TVHEADEND_USER:-admin}
+      TVHEADEND_PASSWORD: ${TVHEADEND_PASSWORD:-admin}
+      TVHEADEND_AUTH: ${TVHEADEND_AUTH:-basic}
+      TVHEADEND_TIMEOUT_MS: ${TVHEADEND_TIMEOUT_MS:-10000}
+
+      # Stream encoding / HLS
+      HLS_ROOT: /data/hls
+      FFMPEG_PATH: ${FFMPEG_PATH:-ffmpeg}
+      FFMPEG_PRESET: ${FFMPEG_PRESET:-veryfast}
+      FFMPEG_CRF: ${FFMPEG_CRF:-20}
+      FFMPEG_MAXRATE: ${FFMPEG_MAXRATE:-6M}
+      FFMPEG_BUFSIZE: ${FFMPEG_BUFSIZE:-12M}
+      FFMPEG_AUDIO_BITRATE: ${FFMPEG_AUDIO_BITRATE:-192k}
+      HLS_TIME: ${HLS_TIME:-2}
+      HLS_LIST_SIZE: ${HLS_LIST_SIZE:-30}
+      STREAM_COPY: ${STREAM_COPY:-auto}
+      STREAM_IDLE_MS: ${STREAM_IDLE_MS:-30000}
+      STREAM_STARTUP_TIMEOUT_MS: ${STREAM_STARTUP_TIMEOUT_MS:-45000}
+      STREAM_MAX_CONCURRENT: ${STREAM_MAX_CONCURRENT:-8}
+      HOT_CHANNELS: ${HOT_CHANNELS:-1}
+
+volumes:
+  postgres-data:
+  hls-data:

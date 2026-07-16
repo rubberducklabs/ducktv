@@ -1,0 +1,215 @@
+<div class="tv-shell">
+  <header class="tv-header">
+    <div>
+      <p class="tv-brand">TV Player</p>
+      <h1 class="tv-title">
+        <%= if @selected do %>
+          {if @selected.number, do: "#{@selected.number} · "}{@selected.name}
+        <% else %>
+          Kanal wählen
+        <% end %>
+      </h1>
+    </div>
+    <nav class="tv-nav" aria-label="Hauptnavigation">
+      <.link navigate={~p"/"} class="tv-nav-link tv-nav-link-active">Live</.link>
+      <.link navigate={~p"/guide"} class="tv-nav-link">TV-Programm</.link>
+    </nav>
+  </header>
+
+  <section class="tv-player-panel" aria-label="Videoplayer">
+    <%!-- phx-update="ignore": HLS/<video> must not be patched on LiveView diffs.
+         Stream URL/status are pushed via "stream_state" events, not data attributes. --%>
+    <div id="player-stage-wrap" class="tv-player-stage">
+      <div
+        id="player-stage"
+        class="tv-player-media"
+        phx-hook="VideoPlayer"
+        phx-update="ignore"
+        tabindex="0"
+        role="region"
+        aria-label="Videoplayer"
+      >
+        <video
+          id="tv-video"
+          class="size-full max-h-none max-w-none bg-black object-contain"
+          playsinline
+        ></video>
+
+        <div class="tv-player-ui" data-player-ui hidden>
+          <button
+            type="button"
+            class="tv-player-big-play"
+            data-big-play
+            hidden
+            aria-label="Abspielen"
+          >
+            <span class="hero-play-solid size-12"></span>
+          </button>
+
+          <div class="tv-player-chrome" data-chrome>
+            <div class="tv-player-chrome-bar">
+              <button
+                type="button"
+                class="tv-player-ctrl"
+                data-play-pause
+                aria-label="Abspielen"
+              >
+                <span class="hero-play-solid size-7" data-icon-play></span>
+                <span class="hero-pause-solid size-7" data-icon-pause hidden></span>
+              </button>
+
+              <div class="tv-player-volume">
+                <button
+                  type="button"
+                  class="tv-player-ctrl"
+                  data-mute
+                  aria-label="Stummschalten"
+                >
+                  <span class="hero-speaker-wave-solid size-6" data-icon-unmuted></span>
+                  <span class="hero-speaker-x-mark-solid size-6" data-icon-muted hidden></span>
+                </button>
+                <label class="sr-only" for="tv-volume">Lautstärke</label>
+                <input
+                  id="tv-volume"
+                  class="tv-player-volume-slider"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value="1"
+                  data-volume
+                  aria-label="Lautstärke"
+                />
+              </div>
+
+              <span class="tv-player-live" aria-label="Live">
+                <span class="hero-signal-solid size-5"></span>
+                <span>LIVE</span>
+              </span>
+
+              <button
+                type="button"
+                class="tv-player-ctrl tv-player-fullscreen"
+                data-fullscreen
+                aria-label="Vollbild"
+              >
+                <span class="hero-arrows-pointing-out-solid size-6" data-icon-fs-enter></span>
+                <span class="hero-arrows-pointing-in-solid size-6" data-icon-fs-exit hidden></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        :if={@selected && @stream_status in [:starting, :idle]}
+        id="player-overlay-starting"
+        class="tv-player-overlay"
+        role="status"
+      >
+        <p class="tv-overlay-title">Kanal wird gestartet…</p>
+        <p class="tv-overlay-text">Bitte einen Moment warten.</p>
+      </div>
+
+      <div
+        :if={@stream_status == :error}
+        id="player-overlay-error"
+        class="tv-player-overlay tv-player-overlay-error"
+        role="alert"
+      >
+        <p class="tv-overlay-title">Kanal nicht verfügbar</p>
+        <p class="tv-overlay-text">{@stream_error || "Etwas ist schiefgelaufen."}</p>
+        <button type="button" class="tv-button" phx-click="retry">Erneut versuchen</button>
+      </div>
+
+      <div
+        :if={@selected && @stream_status == :ready}
+        class="tv-radio-badge"
+        id="radio-badge"
+        hidden
+      >
+        Radio
+      </div>
+    </div>
+
+    <div :if={@selected} class="tv-now-next">
+      <% epg = now_next(@now_map, @selected) %>
+      <div>
+        <p class="tv-label">Jetzt</p>
+        <p class="tv-programme">{programme_title(epg[:now])}</p>
+        <p :if={epg[:now]} class="tv-programme-time">
+          {format_time(epg[:now].starts_at)} – {format_time(epg[:now].ends_at)}
+        </p>
+      </div>
+      <div>
+        <p class="tv-label">Danach</p>
+        <p class="tv-programme">{programme_title(epg[:next])}</p>
+        <p :if={epg[:next]} class="tv-programme-time">
+          {format_time(epg[:next].starts_at)} – {format_time(epg[:next].ends_at)}
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="tv-channels" aria-label="Kanäle">
+    <form
+      id="channel-filter-form"
+      phx-change="filter"
+      class="tv-filter-form"
+      onsubmit="return false;"
+    >
+      <label for="channel-filter" class="sr-only">Kanal suchen</label>
+      <input
+        id="channel-filter"
+        name="q"
+        type="search"
+        value={@filter}
+        placeholder="Kanal suchen"
+        class="tv-input"
+        autocomplete="off"
+      />
+    </form>
+
+    <div class="tv-channel-grid" role="list">
+      <button
+        :for={channel <- filtered_channels(@channels, @filter)}
+        type="button"
+        role="listitem"
+        id={"channel-#{channel.uuid}"}
+        class={[
+          "tv-channel-tile",
+          "phx-click-loading:opacity-70",
+          "phx-click-loading:pointer-events-none",
+          @selected && @selected.uuid == channel.uuid && "tv-channel-tile-active"
+        ]}
+        phx-click="select_channel"
+        phx-value-uuid={channel.uuid}
+        aria-pressed={to_string(@selected && @selected.uuid == channel.uuid)}
+      >
+        <% status = encoder_status(@encoder_statuses, channel.uuid) %>
+        <span class="tv-channel-heading">
+          <span class="tv-channel-number">{channel.number || "–"}</span>
+          <span
+            class={["tv-encoder-dot", encoder_dot_class(status)]}
+            title={encoder_dot_label(status)}
+            aria-label={encoder_dot_label(status)}
+          ></span>
+        </span>
+        <img
+          :if={icon_url(channel.icon_path)}
+          src={icon_url(channel.icon_path)}
+          alt=""
+          class="tv-channel-logo"
+          loading="lazy"
+        />
+        <span class="tv-channel-name">{channel.name}</span>
+        <% epg = now_next(@now_map, channel) %>
+        <span class="tv-channel-now">{programme_title(epg[:now])}</span>
+      </button>
+    </div>
+
+    <p :if={filtered_channels(@channels, @filter) == []} class="tv-empty">
+      Keine Kanäle entsprechen der Suche.
+    </p>
+  </section>
+</div>

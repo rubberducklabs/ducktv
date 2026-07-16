@@ -1,0 +1,196 @@
+<div class="tv-shell">
+  <header class="tv-header">
+    <div>
+      <p class="tv-brand">TV Player</p>
+      <h1 class="tv-title">TV-Programm</h1>
+    </div>
+    <nav class="tv-nav" aria-label="Hauptnavigation">
+      <.link navigate={~p"/"} class="tv-nav-link">Live</.link>
+      <.link navigate={~p"/guide"} class="tv-nav-link tv-nav-link-active">TV-Programm</.link>
+    </nav>
+  </header>
+
+  <section class="tv-guide-controls" aria-label="Programmsteuerung">
+    <div class="tv-day-controls">
+      <button type="button" class="tv-button tv-button-secondary" phx-click="prev_day">
+        Vorheriger Tag
+      </button>
+      <p class="tv-day-label">{format_day(@day)}</p>
+      <button type="button" class="tv-button tv-button-secondary" phx-click="next_day">
+        Nächster Tag
+      </button>
+      <button type="button" class="tv-button" phx-click="jump_now">Jetzt</button>
+    </div>
+
+    <form
+      id="guide-search-form"
+      phx-change="search"
+      class="tv-filter-form"
+      onsubmit="return false;"
+    >
+      <label for="guide-search" class="sr-only">Sendungen suchen</label>
+      <input
+        id="guide-search"
+        name="q"
+        type="search"
+        value={@search}
+        placeholder="Sendungen suchen"
+        class="tv-input"
+        autocomplete="off"
+        phx-debounce="300"
+      />
+    </form>
+  </section>
+
+  <div :if={String.length(@search) >= 2} class="tv-search-results">
+    <h2 class="tv-section-title">Suchergebnisse</h2>
+    <button
+      :for={programme <- @search_results}
+      type="button"
+      class="tv-programme-row"
+      phx-click="show_detail"
+      phx-value-id={programme.event_id}
+    >
+      <span class="tv-programme-time-range">
+        {format_time(programme.starts_at)} · {programme.channel_name}
+      </span>
+      <span class="tv-programme-row-title">{programme_title(programme)}</span>
+      <span class="tv-programme-row-desc">{truncate(
+        programme.description || programme.summary,
+        120
+      )}</span>
+    </button>
+    <p :if={@search_results == []} class="tv-empty">Keine Sendungen gefunden.</p>
+  </div>
+
+  <div :if={String.length(@search) < 2} class="tv-epg-wrap">
+    <p :if={@error} class="tv-empty" role="alert">{@error}</p>
+
+    <div
+      id="tv-epg"
+      class="tv-epg"
+      phx-hook="EpgGuide"
+      data-now-offset={@now_offset}
+      aria-label="TV-Programm"
+      aria-busy={to_string(@loading)}
+    >
+      <div class="tv-epg-scroll">
+        <div class="tv-epg-grid" style={"--epg-day-width: #{@day_width}px"}>
+          <div class="tv-epg-time-row">
+            <div class="tv-epg-corner" aria-hidden="true">Kanal</div>
+            <div class="tv-epg-timeline" style={"width: #{@day_width}px"}>
+              <div
+                :for={mark <- hour_marks()}
+                class="tv-epg-hour"
+                style={"left: #{mark.offset}px"}
+              >
+                {mark.label}
+              </div>
+              <div
+                :if={@now_offset}
+                class="tv-epg-now-line"
+                style={"left: #{@now_offset}px"}
+                aria-hidden="true"
+              >
+              </div>
+            </div>
+          </div>
+
+          <div
+            :for={channel <- @channels}
+            class="tv-epg-row"
+            id={"epg-row-#{channel.uuid}"}
+          >
+            <button
+              type="button"
+              class="tv-epg-channel"
+              phx-click="watch_channel"
+              phx-value-uuid={channel.uuid}
+              title={"#{channel.name} ansehen"}
+            >
+              <span class="tv-channel-number">{channel.number || "–"}</span>
+              <span class="tv-channel-name">{channel.name}</span>
+            </button>
+
+            <div class="tv-epg-track" style={"width: #{@day_width}px"}>
+              <div
+                :if={@now_offset}
+                class="tv-epg-now-line"
+                style={"left: #{@now_offset}px"}
+                aria-hidden="true"
+              >
+              </div>
+
+              <p :if={@loading} class="tv-epg-empty">Sendungen werden geladen…</p>
+
+              <button
+                :for={programme <- channel_programmes(@programmes_by_channel, channel)}
+                type="button"
+                id={"epg-prog-#{programme.event_id}"}
+                class={[
+                  "tv-epg-programme",
+                  programme_now?(programme) && "tv-epg-programme-now"
+                ]}
+                style={programme_style(programme, @day)}
+                phx-click="show_detail"
+                phx-value-id={programme.event_id}
+                title={"#{format_time(programme.starts_at)} – #{format_time(programme.ends_at)} · #{programme_title(programme)}"}
+              >
+                <span class="tv-epg-programme-time">
+                  {format_time(programme.starts_at)}
+                </span>
+                <span class="tv-epg-programme-title">{programme_title(programme)}</span>
+              </button>
+
+              <p
+                :if={!@loading and channel_programmes(@programmes_by_channel, channel) == []}
+                class="tv-epg-empty"
+              >
+                Keine Programminformation
+              </p>
+            </div>
+          </div>
+
+          <p :if={@channels == []} class="tv-empty tv-epg-no-channels">
+            Keine Kanäle verfügbar.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    :if={@detail}
+    id="programme-detail"
+    class="tv-modal-backdrop"
+    phx-window-keydown="close_detail"
+    phx-key="Escape"
+  >
+    <div class="tv-modal" role="dialog" aria-modal="true" aria-labelledby="programme-detail-title">
+      <h2 id="programme-detail-title" class="tv-modal-title">{programme_title(@detail)}</h2>
+      <p class="tv-programme-time-range">
+        {format_time(@detail.starts_at)} – {format_time(@detail.ends_at)}
+        <%= if @detail.channel_name do %>
+          · {@detail.channel_name}
+        <% end %>
+      </p>
+      <p :if={@detail.subtitle} class="tv-modal-subtitle">{@detail.subtitle}</p>
+      <p class="tv-modal-body">
+        {@detail.description || @detail.summary || "Keine Beschreibung verfügbar."}
+      </p>
+      <div class="tv-modal-actions">
+        <button
+          type="button"
+          class="tv-button"
+          phx-click="watch_channel"
+          phx-value-uuid={@detail.channel_uuid}
+        >
+          Kanal ansehen
+        </button>
+        <button type="button" class="tv-button tv-button-secondary" phx-click="close_detail">
+          Schließen
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
