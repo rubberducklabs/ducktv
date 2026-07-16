@@ -137,3 +137,4 @@ TVH_INTEGRATION=1 mix test --only integration
 - **No icons** — icons are proxied via `/icons/...` from TVHeadend `imagecache` paths.
 - **LAN access** — bind is `0.0.0.0:4000` in dev; ensure the client can reach both Phoenix and that TVHeadend allows the app host.
 # ducktv
+# ducktv
