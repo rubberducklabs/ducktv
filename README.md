@@ -109,7 +109,8 @@ mix phx.server
 | `TVHEADEND_AUTH` | `basic` | `basic` or `digest` |
 | `HOT_CHANNELS` | `1` | Comma-separated channel numbers kept always encoding |
 | `STREAM_MAX_CONCURRENT` | `6` | Max simultaneous encoders |
-| `STREAM_STARTUP_TIMEOUT_MS` | `45000` | Max wait for first HLS segments before error |
+| `STREAM_STARTUP_TIMEOUT_MS` | `45000` | Max wait for first HLS segments when `STREAM_COPY=off` |
+| `STREAM_COPY_STARTUP_TIMEOUT_MS` | `120000` | Max wait when remux is enabled (long broadcast GOPs) |
 | `STREAM_IDLE_MS` | `30000` | Idle stop delay after last viewer leaves |
 | `STREAM_COPY` | `auto` | `auto` remuxes web-compatible H.264; `off` always transcodes |
 | `FFMPEG_PRESET` | `veryfast` | x264 preset (transcode path only) |
@@ -140,7 +141,7 @@ TVH_INTEGRATION=1 mix test --only integration
 
 ## Troubleshooting
 
-- **Endless “Starting channel…”** — check TVHeadend reachability, credentials, and that a tuner is free. Startup times out with a clear error after `STREAM_STARTUP_TIMEOUT_MS`.
+- **Endless “Starting channel…”** — check TVHeadend reachability, credentials, and that a tuner is free. Startup times out with a clear error after `STREAM_STARTUP_TIMEOUT_MS` (or `STREAM_COPY_STARTUP_TIMEOUT_MS` when remux is on). H.264 remux waits for source keyframes, so the first picture can take 10–30s on typical HD channels.
 - **High CPU** — reduce `HOT_CHANNELS`, lower `STREAM_MAX_CONCURRENT`, or use a faster machine; H.264 sources remux at near-zero CPU (`STREAM_COPY=auto`), while `veryfast` still costs ~1 core per active MPEG-2/HEVC channel.
 - **No icons** — icons are proxied via `/icons/...` from TVHeadend `imagecache` paths.
 - **LAN access** — bind is `0.0.0.0:4000` in dev; ensure the client can reach both Phoenix and that TVHeadend allows the app host.

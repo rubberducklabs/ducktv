@@ -153,17 +153,17 @@ export const VideoPlayer = {
       this.hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        // Sit ~2 finished segments behind live (matches 2s segments +
-        // playlist_ready waiting for 2 segments). Avoid chasing the
-        // segment FFmpeg may still be writing / about to delete.
+        // Sit ~2 finished segments behind live (matches playlist_ready
+        // waiting for 2 segments). Stream-copy remux segments follow the
+        // source GOP (often 5–15s), so keep buffer/timeouts generous.
         liveSyncDurationCount: 2,
         liveMaxLatencyDurationCount: 8,
         maxLiveSyncPlaybackRate: 1,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
         manifestLoadingTimeOut: 15000,
         levelLoadingTimeOut: 15000,
-        fragLoadingTimeOut: 20000,
+        fragLoadingTimeOut: 30000,
         fragLoadingMaxRetry: 6
       })
       this.hls.loadSource(url)

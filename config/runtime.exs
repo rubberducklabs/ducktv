@@ -71,6 +71,8 @@ if config_env() != :test do
         end,
       idle_ms: String.to_integer(System.get_env("STREAM_IDLE_MS", "900000")),
       startup_timeout_ms: String.to_integer(System.get_env("STREAM_STARTUP_TIMEOUT_MS", "45000")),
+      copy_startup_timeout_ms:
+        String.to_integer(System.get_env("STREAM_COPY_STARTUP_TIMEOUT_MS", "120000")),
       max_concurrent: String.to_integer(System.get_env("STREAM_MAX_CONCURRENT", "6")),
       hot_channels: parse_hot_channels.(System.get_env("HOT_CHANNELS", "1")),
       runner: Tvplayer.Streams.FFmpeg

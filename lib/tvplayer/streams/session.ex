@@ -169,7 +169,9 @@ defmodule Tvplayer.Streams.Session do
       {:ok, runner_pid} ->
         Process.monitor(runner_pid)
 
-        startup_ms = Keyword.get(config, :startup_timeout_ms, 45_000)
+        # Stream-copy segments only close on source keyframes. Broadcast H.264
+        # GOPs are often 5–15s, so allow a longer window when remux is enabled.
+        startup_ms = startup_timeout_ms(config)
         startup_timer = Process.send_after(self(), :startup_timeout, startup_ms)
         ready_check_timer = Process.send_after(self(), :check_ready, 250)
 
@@ -266,6 +268,17 @@ defmodule Tvplayer.Streams.Session do
     :ok
   end
 
+  @doc false
+  def startup_timeout_ms(config) when is_list(config) do
+    # When STREAM_COPY is enabled we may remux; give long-GOP sources time to
+    # emit ≥2 keyframe-aligned segments. Transcode-only keeps the short timeout.
+    if Keyword.get(config, :copy, :auto) == :off do
+      Keyword.get(config, :startup_timeout_ms, 45_000)
+    else
+      Keyword.get(config, :copy_startup_timeout_ms, 120_000)
+    end
+  end
+
   defp maybe_demote_copy(state) do
     config = Application.get_env(:tvplayer, :streams, [])
     runner = Keyword.get(config, :runner, Tvplayer.Streams.FFmpeg)
@@ -337,6 +350,11 @@ defmodule Tvplayer.Streams.Session do
 
   defp cleanup(state) do
     state = stop_runner(state)
+
+    if state.runner_mod == Tvplayer.Streams.FFmpeg do
+      Tvplayer.Streams.FFmpeg.kill_channel_orphans(state.output_dir)
+    end
+
     cleanup_dir(state.output_dir)
     state
   end

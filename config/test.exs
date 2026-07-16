@@ -49,6 +49,7 @@ config :tvplayer,
     copy: :auto,
     idle_ms: 200,
     startup_timeout_ms: 1_000,
+    copy_startup_timeout_ms: 1_000,
     max_concurrent: 4,
     hot_channels: [],
     runner: Tvplayer.Streams.FakeRunner

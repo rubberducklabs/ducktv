@@ -11,8 +11,11 @@ defmodule Tvplayer.Streams.Manager do
 
   require Logger
 
+  alias Tvplayer.Streams.FFmpeg
   alias Tvplayer.Streams.Session
   alias Tvplayer.Tvheadend.Cache
+
+  @orphan_sweep_ms 60_000
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -28,6 +31,11 @@ defmodule Tvplayer.Streams.Manager do
 
   def ensure_hot_channels do
     GenServer.cast(__MODULE__, :ensure_hot_channels)
+  end
+
+  @doc false
+  def sweep_orphans_now do
+    GenServer.call(__MODULE__, :sweep_orphans)
   end
 
   def list_sessions do
@@ -56,6 +64,7 @@ defmodule Tvplayer.Streams.Manager do
   @impl true
   def init(_opts) do
     send(self(), :boot_hot_channels)
+    schedule_orphan_sweep()
     {:ok, %{}}
   end
 
@@ -68,6 +77,10 @@ defmodule Tvplayer.Streams.Manager do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  def handle_call(:sweep_orphans, _from, state) do
+    {:reply, do_sweep_orphans(), state}
   end
 
   @impl true
@@ -93,6 +106,34 @@ defmodule Tvplayer.Streams.Manager do
     end
 
     {:noreply, state}
+  end
+
+  def handle_info(:sweep_orphans, state) do
+    _ = do_sweep_orphans()
+    schedule_orphan_sweep()
+    {:noreply, state}
+  end
+
+  defp schedule_orphan_sweep do
+    Process.send_after(self(), :sweep_orphans, @orphan_sweep_ms)
+  end
+
+  defp do_sweep_orphans do
+    config = Application.get_env(:tvplayer, :streams, [])
+
+    if Keyword.get(config, :runner, FFmpeg) == FFmpeg do
+      hls_root = Keyword.fetch!(config, :hls_root)
+      live_uuids = Enum.map(list_sessions(), fn {uuid, _pid} -> uuid end)
+      killed = FFmpeg.kill_orphans_except(hls_root, live_uuids)
+
+      if killed > 0 do
+        Logger.warning("periodic orphan sweep killed #{killed} leftover ffmpeg process(es)")
+      end
+
+      killed
+    else
+      0
+    end
   end
 
   defp start_hot_channels do

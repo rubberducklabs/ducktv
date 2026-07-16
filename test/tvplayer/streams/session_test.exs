@@ -45,6 +45,12 @@ defmodule Tvplayer.Streams.SessionTest do
     assert Session.status(channel.uuid).viewers == 1
   end
 
+  test "startup_timeout_ms uses the longer copy window when remux is enabled" do
+    assert Session.startup_timeout_ms(copy: :auto, copy_startup_timeout_ms: 120_000) == 120_000
+    assert Session.startup_timeout_ms(copy: :off, startup_timeout_ms: 45_000) == 45_000
+    assert Session.startup_timeout_ms([]) == 120_000
+  end
+
   test "second watcher reuses the same session", %{channel: channel} do
     assert {:ok, _} = Manager.watch(channel.uuid, self())
     assert wait_until(fn -> Session.status(channel.uuid).status == :ready end)
@@ -151,6 +157,10 @@ defmodule Tvplayer.Streams.SessionTest do
     assert Session.status(channel.uuid).status == :ready
 
     assert wait_until(fn -> Registry.lookup(Tvplayer.Streams.Registry, channel.uuid) == [] end)
+  end
+
+  test "orphan sweep is a no-op when FakeRunner is configured" do
+    assert Manager.sweep_orphans_now() == 0
   end
 
   defp wait_until(fun, attempts \\ 40) do

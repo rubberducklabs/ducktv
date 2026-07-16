@@ -57,6 +57,7 @@ RUN apt-get update \
     libstdc++6 \
     locales \
     openssl \
+    procps \
     tini \
   && rm -rf /var/lib/apt/lists/*
 

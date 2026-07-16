@@ -36,6 +36,9 @@ config :tvplayer,
     # Idle sessions are still reclaimed immediately when a new channel needs a slot.
     idle_ms: 900_000,
     startup_timeout_ms: 45_000,
+    # Stream-copy waits on source keyframes (broadcast GOPs are often 5–15s).
+    # Need ≥2 independent HLS segments before the session is ready.
+    copy_startup_timeout_ms: 120_000,
     max_concurrent: 6,
     hot_channels: [1],
     runner: Tvplayer.Streams.FFmpeg

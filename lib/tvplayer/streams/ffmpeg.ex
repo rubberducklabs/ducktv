@@ -80,7 +80,7 @@ defmodule Tvplayer.Streams.FFmpeg do
 
   @doc """
   Kills ffmpeg processes whose command line writes under `hls_root`.
-  Returns the number of processes signaled.
+  Returns the number of processes confirmed dead.
   """
   def kill_orphans(hls_root) when is_binary(hls_root) do
     root = Path.expand(hls_root)
@@ -88,11 +88,16 @@ defmodule Tvplayer.Streams.FFmpeg do
     matching_ffmpeg_pids(fn cmdline ->
       String.contains?(cmdline, root)
     end)
-    |> Enum.map(fn pid ->
+    |> Enum.count(fn pid ->
       kill_os_process(pid)
-      pid
+      dead? = not os_process_alive?(pid)
+
+      unless dead? do
+        Logger.error("ffmpeg pid #{pid} survived orphan kill under #{root}")
+      end
+
+      dead?
     end)
-    |> length()
   end
 
   @doc """
@@ -107,6 +112,30 @@ defmodule Tvplayer.Streams.FFmpeg do
     :ok
   end
 
+  @doc """
+  Kills ffmpeg HLS writers under `hls_root` that do not belong to any of the
+  given live channel UUIDs. Returns the number of processes confirmed dead.
+  """
+  def kill_orphans_except(hls_root, live_uuids)
+      when is_binary(hls_root) and is_list(live_uuids) do
+    root = Path.expand(hls_root)
+    live = MapSet.new(live_uuids)
+
+    matching_ffmpeg_pids(fn cmdline ->
+      String.contains?(cmdline, root) and not live_channel_cmdline?(cmdline, root, live)
+    end)
+    |> Enum.count(fn pid ->
+      kill_os_process(pid)
+      dead? = not os_process_alive?(pid)
+
+      unless dead? do
+        Logger.error("ffmpeg pid #{pid} survived periodic orphan sweep under #{root}")
+      end
+
+      dead?
+    end)
+  end
+
   @doc false
   def kill_os_process(pid) when is_integer(pid) and pid > 1 do
     untrack(pid)
@@ -117,6 +146,10 @@ defmodule Tvplayer.Streams.FFmpeg do
       unless await_death(pid, div(@kill_wait_ms, @kill_poll_ms)) do
         _ = signal(pid, @sigkill)
         _ = await_death(pid, 4)
+      end
+
+      if os_process_alive?(pid) do
+        Logger.error("ffmpeg pid #{pid} still alive after SIGTERM and SIGKILL")
       end
     end
 
@@ -406,22 +439,26 @@ defmodule Tvplayer.Streams.FFmpeg do
 
   defp untrack(_), do: :ok
 
-  defp signal(pid, @sigterm) do
-    case System.cmd("kill", ["-TERM", Integer.to_string(pid)], stderr_to_stdout: true) do
-      {_, 0} -> true
-      _ -> false
-    end
-  rescue
-    _ -> false
-  end
+  # Use /bin/sh so the POSIX `kill` builtin works even when procps is absent
+  # (Debian slim production images have no standalone `kill` binary).
+  defp signal(pid, sig) when is_integer(pid) and sig in [@sigterm, @sigkill] do
+    sig_name = if sig == @sigkill, do: "KILL", else: "TERM"
 
-  defp signal(pid, @sigkill) do
-    case System.cmd("kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true) do
-      {_, 0} -> true
-      _ -> false
+    case System.cmd("/bin/sh", ["-c", "kill -#{sig_name} #{pid}"], stderr_to_stdout: true) do
+      {_, 0} ->
+        true
+
+      {out, code} ->
+        Logger.warning(
+          "failed to signal ffmpeg pid #{pid} (#{sig_name}): exit=#{code} #{String.trim(out)}"
+        )
+
+        false
     end
   rescue
-    _ -> false
+    e ->
+      Logger.error("could not send #{sig} to pid #{pid}: #{Exception.message(e)}")
+      false
   end
 
   defp signal(_pid, _sig), do: false
@@ -445,5 +482,11 @@ defmodule Tvplayer.Streams.FFmpeg do
 
   defp ffmpeg_cmdline?(cmdline) do
     String.contains?(cmdline, "ffmpeg") and String.contains?(cmdline, "-hls_segment_filename")
+  end
+
+  defp live_channel_cmdline?(cmdline, root, live_uuids) do
+    Enum.any?(live_uuids, fn uuid ->
+      String.contains?(cmdline, Path.join(root, uuid))
+    end)
   end
 end

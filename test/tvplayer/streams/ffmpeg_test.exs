@@ -299,4 +299,112 @@ defmodule Tvplayer.Streams.FFmpegTest do
       _, _ -> :ok
     end
   end
+
+  test "kill_orphans returns confirmed-dead count" do
+    ffmpeg = System.find_executable("ffmpeg")
+    assert ffmpeg
+
+    hls_root =
+      Path.join(System.tmp_dir!(), "tvplayer_hls_count_#{System.unique_integer([:positive])}")
+
+    out = Path.join(hls_root, "orphan-chan")
+    File.mkdir_p!(out)
+    on_exit(fn -> File.rm_rf!(hls_root) end)
+
+    {port, os_pid} = spawn_hls_ffmpeg(ffmpeg, out)
+    Process.sleep(200)
+    assert FFmpeg.os_process_alive?(os_pid)
+
+    assert FFmpeg.kill_orphans(hls_root) == 1
+    refute FFmpeg.os_process_alive?(os_pid)
+    assert FFmpeg.kill_orphans(hls_root) == 0
+
+    close_port(port)
+  end
+
+  test "kill_orphans_except keeps live channel writers and kills others" do
+    ffmpeg = System.find_executable("ffmpeg")
+    assert ffmpeg
+
+    hls_root =
+      Path.join(System.tmp_dir!(), "tvplayer_hls_except_#{System.unique_integer([:positive])}")
+
+    live_out = Path.join(hls_root, "live-chan")
+    orphan_out = Path.join(hls_root, "orphan-chan")
+    File.mkdir_p!(live_out)
+    File.mkdir_p!(orphan_out)
+    on_exit(fn -> File.rm_rf!(hls_root) end)
+
+    {live_port, live_pid} = spawn_hls_ffmpeg(ffmpeg, live_out)
+    {orphan_port, orphan_pid} = spawn_hls_ffmpeg(ffmpeg, orphan_out)
+    Process.sleep(200)
+
+    assert FFmpeg.os_process_alive?(live_pid)
+    assert FFmpeg.os_process_alive?(orphan_pid)
+
+    assert FFmpeg.kill_orphans_except(hls_root, ["live-chan"]) == 1
+    assert FFmpeg.os_process_alive?(live_pid)
+    refute FFmpeg.os_process_alive?(orphan_pid)
+
+    assert :ok = FFmpeg.kill_os_process(live_pid)
+    refute FFmpeg.os_process_alive?(live_pid)
+
+    close_port(live_port)
+    close_port(orphan_port)
+  end
+
+  defp spawn_hls_ffmpeg(ffmpeg, out) do
+    segment = Path.join(out, "segment_%05d.ts")
+    playlist = Path.join(out, "index.m3u8")
+
+    port =
+      Port.open(
+        {:spawn_executable, ffmpeg},
+        [
+          :binary,
+          :exit_status,
+          :stderr_to_stdout,
+          args: [
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-re",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=160x120:rate=5",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-t",
+            "60",
+            "-f",
+            "hls",
+            "-hls_time",
+            "2",
+            "-hls_segment_filename",
+            segment,
+            playlist
+          ]
+        ]
+      )
+
+    {:os_pid, os_pid} = Port.info(port, :os_pid)
+    {port, os_pid}
+  end
+
+  defp close_port(port) do
+    try do
+      Port.close(port)
+    rescue
+      _ -> :ok
+    catch
+      _, _ -> :ok
+    end
+  end
 end
