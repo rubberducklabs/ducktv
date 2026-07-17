@@ -55,13 +55,21 @@
     >
       <div class="tv-recording-main">
         <div class="tv-recording-channel">
-          <img
-            :if={channel_icon(@channels, recording.channel_uuid)}
-            src={channel_icon(@channels, recording.channel_uuid)}
-            alt=""
-            class="tv-channel-logo"
-            loading="lazy"
-          />
+          <.link
+            :if={recording.channel_uuid && channel_icon(@channels, recording.channel_uuid)}
+            id={"watch-channel-#{recording.uuid}"}
+            navigate={~p"/?channel=#{recording.channel_uuid}"}
+            class="tv-recording-channel-link"
+            title={"#{recording.channel_name || "Kanal"} ansehen"}
+            aria-label={"#{recording.channel_name || "Kanal"} ansehen"}
+          >
+            <img
+              src={channel_icon(@channels, recording.channel_uuid)}
+              alt=""
+              class="tv-channel-logo"
+              loading="lazy"
+            />
+          </.link>
           <span class="tv-recording-channel-name">
             {recording.channel_name || "Unbekannter Kanal"}
           </span>
@@ -294,16 +302,6 @@
               Nein
             </button>
           </div>
-
-          <button
-            :if={recording.channel_uuid}
-            type="button"
-            class="tv-button tv-button-secondary"
-            phx-click="watch_channel"
-            phx-value-uuid={recording.channel_uuid}
-          >
-            Kanal ansehen
-          </button>
         </div>
       </div>
     </article>

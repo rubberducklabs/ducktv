@@ -77,10 +77,6 @@ defmodule TvplayerWeb.RecordingsLive do
     {:noreply, socket |> assign(filter: filter) |> assign_filtered()}
   end
 
-  def handle_event("watch_channel", %{"uuid" => uuid}, socket) do
-    {:noreply, push_navigate(socket, to: ~p"/?channel=#{uuid}")}
-  end
-
   def handle_event("cancel_recording", %{"uuid" => uuid}, socket) do
     case Dvr.cancel_or_stop(uuid) do
       {:ok, _} ->

@@ -1346,6 +1346,22 @@ body {
   gap: 0.65rem;
 }
 
+.tv-recording-channel-link {
+  display: inline-flex;
+  border-radius: 0.35rem;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.tv-recording-channel-link:hover {
+  opacity: 0.85;
+  transform: scale(1.04);
+}
+
+.tv-recording-channel-link:focus-visible {
+  outline: 2px solid var(--tv-accent);
+  outline-offset: 2px;
+}
+
 .tv-recording-error {
   margin: 0.5rem 0 0;
   color: #fca5a5;
