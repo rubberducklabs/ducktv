@@ -15,6 +15,8 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
   require Logger
 
   alias Tvplayer.Streams.FFmpeg, as: StreamsFFmpeg
+  alias Tvplayer.Streams.Probe
+  alias Tvplayer.Streams.Probe.Result
 
   defstruct [
     :port,
@@ -88,11 +90,15 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
   end
 
   @doc false
-  def build_args(opts, config) do
+  def build_args(opts, config, %Result{} = probe) do
     threads = to_string(Keyword.get(config, :threads, 4))
     crf = to_string(Keyword.get(config, :crf, 23))
     preset = Keyword.get(config, :preset, "veryfast")
     audio_bitrate = Keyword.get(config, :audio_bitrate, "160k")
+
+    # Same deinterlace/scale filters as live HLS — interlaced DVR (e.g. Servus TV)
+    # otherwise keeps combing artifacts after libx264 encode.
+    video_filters = StreamsFFmpeg.maybe_vf(probe)
 
     [
       "-hide_banner",
@@ -122,27 +128,30 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
       "-pix_fmt",
       "yuv420p",
       "-crf",
-      crf,
-      "-c:a",
-      "aac",
-      "-b:a",
-      audio_bitrate,
-      "-ac",
-      "2",
-      "-ar",
-      "48000",
-      "-movflags",
-      "+faststart",
-      "-threads",
-      threads,
-      "-progress",
-      "pipe:1",
-      "-nostats",
-      # Explicit format: temp path ends in `.mp4.part` which ffmpeg cannot sniff.
-      "-f",
-      "mp4",
-      opts.part_path
-    ]
+      crf
+    ] ++
+      video_filters ++
+      [
+        "-c:a",
+        "aac",
+        "-b:a",
+        audio_bitrate,
+        "-ac",
+        "2",
+        "-ar",
+        "48000",
+        "-movflags",
+        "+faststart",
+        "-threads",
+        threads,
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        # Explicit format: temp path ends in `.mp4.part` which ffmpeg cannot sniff.
+        "-f",
+        "mp4",
+        opts.part_path
+      ]
   end
 
   @doc false
@@ -193,9 +202,15 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
         _ -> nil
       end
 
-    args = build_args(opts, config)
+    probe = Probe.probe(opts.input_url)
+    args = build_args(opts, config, probe)
 
-    Logger.info("starting recording transcode for #{opts.uuid}")
+    Logger.info(
+      "starting recording transcode for #{opts.uuid} " <>
+        "(codec=#{probe.video_codec || "unknown"} " <>
+        "field_order=#{probe.field_order || "unknown"} " <>
+        "deint=#{Probe.interlaced?(probe)})"
+    )
 
     port =
       Port.open(

@@ -189,6 +189,7 @@ defmodule Tvplayer.Recordings.FFmpegRunnerTest do
   use ExUnit.Case, async: true
 
   alias Tvplayer.Recordings.FFmpegRunner
+  alias Tvplayer.Streams.Probe.Result
 
   test "parses out_time_us progress lines" do
     assert FFmpegRunner.parse_progress_line("out_time_us=1500000") == {:out_time_us, 1_500_000}
@@ -206,7 +207,15 @@ defmodule Tvplayer.Recordings.FFmpegRunnerTest do
       part_path: "/tmp/abc.mp4.part"
     }
 
-    args = FFmpegRunner.build_args(opts, threads: 4, crf: 23, preset: "veryfast")
+    probe = %Result{
+      has_video?: true,
+      video_codec: "h264",
+      width: 1920,
+      height: 1080,
+      field_order: "progressive"
+    }
+
+    args = FFmpegRunner.build_args(opts, [threads: 4, crf: 23, preset: "veryfast"], probe)
 
     assert "-threads" in args
     assert "4" in args
@@ -217,5 +226,67 @@ defmodule Tvplayer.Recordings.FFmpegRunnerTest do
     assert "-f" in args
     assert "mp4" in args
     assert opts.part_path in args
+    refute "-vf" in args
+  end
+
+  test "build_args applies yadif for interlaced recordings" do
+    opts = %{
+      input_url: "http://user:pass@tvh/dvrfile/servus",
+      part_path: "/tmp/servus.mp4.part"
+    }
+
+    probe = %Result{
+      has_video?: true,
+      video_codec: "mpeg2video",
+      pix_fmt: "yuv420p",
+      width: 720,
+      height: 576,
+      field_order: "tt"
+    }
+
+    args = FFmpegRunner.build_args(opts, [], probe)
+
+    assert Enum.any?(
+             args,
+             &String.contains?(to_string(&1), "yadif=mode=send_frame:parity=auto:deint=all")
+           )
+
+    refute Enum.any?(args, &String.contains?(to_string(&1), "min(1920,iw)"))
+  end
+
+  test "build_args applies yadif when field_order is unknown" do
+    opts = %{
+      input_url: "http://user:pass@tvh/dvrfile/unknown",
+      part_path: "/tmp/unknown.mp4.part"
+    }
+
+    probe = %Result{has_video?: true, video_codec: "mpeg2video", width: 720, height: 576}
+
+    args = FFmpegRunner.build_args(opts, [], probe)
+
+    assert Enum.any?(
+             args,
+             &String.contains?(to_string(&1), "yadif=mode=send_frame:parity=auto:deint=all")
+           )
+  end
+
+  test "build_args scales when width exceeds 1920" do
+    opts = %{
+      input_url: "http://user:pass@tvh/dvrfile/uhd",
+      part_path: "/tmp/uhd.mp4.part"
+    }
+
+    probe = %Result{
+      has_video?: true,
+      video_codec: "h264",
+      width: 3840,
+      height: 2160,
+      field_order: "progressive"
+    }
+
+    args = FFmpegRunner.build_args(opts, [], probe)
+
+    assert Enum.any?(args, &String.contains?(to_string(&1), "min(1920,iw)"))
+    refute Enum.any?(args, &String.contains?(to_string(&1), "yadif"))
   end
 end
