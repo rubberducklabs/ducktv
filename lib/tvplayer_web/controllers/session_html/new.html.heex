@@ -1,0 +1,35 @@
+<div class="tv-login">
+  <div class="tv-login-panel">
+    <p class="tv-login-brand">TV Player</p>
+    <h1 class="tv-login-title">Anmelden</h1>
+    <p class="tv-login-copy">Gib den Zugangsschlüssel ein, um fortzufahren.</p>
+
+    <%= if @error do %>
+      <p class="tv-login-error" role="alert" id="login-error">{@error}</p>
+    <% end %>
+
+    <form action={~p"/login"} method="post" id="login-form" class="tv-login-form">
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+
+      <label class="tv-field" for="login-password">
+        <span class="sr-only">Passwort</span>
+        <input
+          type="password"
+          name="password"
+          id="login-password"
+          class="tv-input"
+          placeholder="Zugangsschlüssel"
+          autocomplete="current-password"
+          autofocus
+          required
+        />
+      </label>
+
+      <button type="submit" class="tv-button tv-login-submit" id="login-submit">
+        Anmelden
+      </button>
+    </form>
+  </div>
+
+  <Layouts.flash_group flash={@flash} />
+</div>

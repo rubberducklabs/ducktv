@@ -17,6 +17,7 @@ defmodule Tvplayer.Application do
 
     File.mkdir_p!(hls_root)
     File.mkdir_p!(transcode_root)
+    Tvplayer.Auth.init!()
     # Reap ffmpeg left behind by previous BEAM crashes / abrupt restarts.
     Tvplayer.Streams.Probe.ensure_table!()
     Tvplayer.Streams.FFmpeg.prepare!(hls_root)

@@ -43,7 +43,19 @@ if config_env() != :test do
       _ -> :basic
     end
 
+  auth_key =
+    System.get_env("AUTH_KEY") ||
+      if config_env() == :prod do
+        raise """
+        environment variable AUTH_KEY is missing.
+        Set AUTH_KEY to the shared password for the TV Player UI.
+        """
+      else
+        "changeme"
+      end
+
   config :tvplayer,
+    auth_key: auth_key,
     tvheadend: [
       url: System.get_env("TVHEADEND_URL", "http://10.0.1.10:9981"),
       username: System.get_env("TVHEADEND_USER", "admin"),

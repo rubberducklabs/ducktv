@@ -4,11 +4,15 @@ defmodule TvplayerWeb.Endpoint do
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
   # Set :encryption_salt if you would also like to encrypt it.
+  # Persist as long as browsers allow (Chrome caps cookies at ~400 days).
+  @session_max_age 60 * 60 * 24 * 400
+
   @session_options [
     store: :cookie,
     key: "_tvplayer_key",
     signing_salt: "CeX97Trp",
-    same_site: "Lax"
+    same_site: "Lax",
+    max_age: @session_max_age
   ]
 
   socket "/live", Phoenix.LiveView.Socket,

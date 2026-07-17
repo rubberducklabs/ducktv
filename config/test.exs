@@ -27,7 +27,13 @@ config :phoenix_live_view,
 config :phoenix,
   sort_verified_routes_query_params: true
 
+# Fast Argon2 parameters for tests (production uses library defaults).
+config :argon2_elixir,
+  t_cost: 1,
+  m_cost: 8
+
 config :tvplayer,
+  auth_key: "test-auth-key",
   tvheadend: [
     url: "http://tvheadend.test",
     username: "test",

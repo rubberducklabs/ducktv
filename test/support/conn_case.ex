@@ -6,6 +6,9 @@ defmodule TvplayerWeb.ConnCase do
   Such tests rely on `Phoenix.ConnTest` and also
   import other functionality to make it easier
   to build common data structures and query the data layer.
+
+  By default the connection is authenticated. Tag a test with
+  `@tag :guest` to keep it logged out.
   """
 
   use ExUnit.CaseTemplate
@@ -24,7 +27,18 @@ defmodule TvplayerWeb.ConnCase do
     end
   end
 
-  setup _tags do
-    {:ok, conn: Phoenix.ConnTest.build_conn()}
+  setup tags do
+    conn = Phoenix.ConnTest.build_conn()
+    conn = if tags[:guest], do: conn, else: log_in(conn)
+    {:ok, conn: conn}
+  end
+
+  @doc """
+  Logs the test connection in with a long-lived auth session cookie.
+  """
+  def log_in(conn) do
+    conn
+    |> Phoenix.ConnTest.init_test_session(%{})
+    |> Plug.Conn.put_session(:authenticated, true)
   end
 end

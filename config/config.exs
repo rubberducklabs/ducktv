@@ -13,6 +13,8 @@ config :tvplayer,
   # No database in v1 — TVHeadend is the source of truth. Re-add ecto_repos when needed.
   ecto_repos: [],
   generators: [timestamp_type: :utc_datetime, binary_id: true],
+  # Shared secret for cookie-based UI auth (override via AUTH_KEY).
+  auth_key: "changeme",
   tvheadend: [
     url: "http://10.0.1.10:9981",
     username: "admin",
