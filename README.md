@@ -32,7 +32,7 @@ cd /mnt/user/appdata/tvplayer
 cp .env.example .env
 ```
 
-3. Edit `.env`: set `SECRET_KEY_BASE` (`openssl rand -base64 48`), `PHX_HOST` to your Unraid IP, and `TVHEADEND_*`.
+3. Edit `.env`: set `SECRET_KEY_BASE` (`openssl rand -base64 48`), `PHX_HOST` to your Unraid IP (or reverse-proxy hostname), and `TVHEADEND_*`. Behind a reverse proxy, also set `PHX_PORT=80` (or `PHX_SCHEME=https` without `PHX_PORT`).
 4. Build and start:
 
 ```bash
@@ -119,6 +119,8 @@ mix phx.server
 | `HLS_ROOT` | `tmp/hls` (Docker: `/data/hls`) | Playlist/segment working directory |
 | `SECRET_KEY_BASE` | — | Required in production / Docker |
 | `PHX_HOST` | `localhost` | Hostname or IP used to reach the app |
+| `PHX_SCHEME` | `http` | `http` or `https` (use `https` behind a TLS reverse proxy) |
+| `PHX_PORT` | `PORT` (or `443` if `PHX_SCHEME=https`) | Public URL port for share links. Behind a reverse proxy on standard ports set `80` (http) or leave unset with https |
 
 ## Architecture notes
 

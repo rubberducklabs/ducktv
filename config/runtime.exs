@@ -132,8 +132,18 @@ if config_env() == :prod do
       """
 
   host = System.get_env("PHX_HOST") || "localhost"
-  port = String.to_integer(System.get_env("PORT", "4000"))
   scheme = System.get_env("PHX_SCHEME", "http")
+  # PORT is the container bind port. PHX_PORT is the public URL port
+  # (share links, redirects). Behind a reverse proxy on standard ports,
+  # set PHX_PORT=80 or omit it with PHX_SCHEME=https (defaults to 443).
+  bind_port = String.to_integer(System.get_env("PORT", "4000"))
+
+  url_port =
+    case System.get_env("PHX_PORT") do
+      value when value in [nil, ""] and scheme == "https" -> 443
+      value when value in [nil, ""] -> bind_port
+      value -> String.to_integer(value)
+    end
 
   check_origin =
     case System.get_env("PHX_CHECK_ORIGIN", "false") do
@@ -145,7 +155,7 @@ if config_env() == :prod do
   config :tvplayer, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :tvplayer, TvplayerWeb.Endpoint,
-    url: [host: host, port: port, scheme: scheme],
+    url: [host: host, port: url_port, scheme: scheme],
     http: [
       # Bind on all IPv4 interfaces (Unraid / Docker LAN access).
       # Use {0, 0, 0, 0, 0, 0, 0, 0} if you need dual-stack IPv6.

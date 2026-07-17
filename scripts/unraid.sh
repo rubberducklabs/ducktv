@@ -29,6 +29,7 @@ load_env() {
   PORT="${PORT:-4000}"
   PHX_HOST="${PHX_HOST:-localhost}"
   PHX_SCHEME="${PHX_SCHEME:-http}"
+  PHX_PORT="${PHX_PORT:-}"
 
   TVHEADEND_URL="${TVHEADEND_URL:-http://10.0.1.10:9981}"
   TVHEADEND_USER="${TVHEADEND_USER:-admin}"
@@ -82,6 +83,7 @@ cmd_start() {
     -e PORT=4000 \
     -e PHX_HOST="$PHX_HOST" \
     -e PHX_SCHEME="$PHX_SCHEME" \
+    ${PHX_PORT:+-e PHX_PORT="$PHX_PORT"} \
     -e SECRET_KEY_BASE="$SECRET_KEY_BASE" \
     -e TVHEADEND_URL="$TVHEADEND_URL" \
     -e TVHEADEND_USER="$TVHEADEND_USER" \
