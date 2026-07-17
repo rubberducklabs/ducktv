@@ -4,13 +4,14 @@ import { LiveSocket } from "phoenix_live_view"
 import { hooks as colocatedHooks } from "phoenix-colocated/tvplayer"
 import topbar from "../vendor/topbar"
 import { VideoPlayer } from "./hooks/video_player"
+import { RecordingPlayer } from "./hooks/recording_player"
 import { EpgGuide } from "./hooks/epg_guide"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: { _csrf_token: csrfToken },
-  hooks: { ...colocatedHooks, VideoPlayer, EpgGuide },
+  hooks: { ...colocatedHooks, VideoPlayer, RecordingPlayer, EpgGuide },
 })
 
 // Show progress bar on live navigation and form submits

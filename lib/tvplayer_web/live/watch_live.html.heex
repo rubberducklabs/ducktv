@@ -11,8 +11,19 @@
       </h1>
     </div>
     <nav class="tv-nav" aria-label="Hauptnavigation">
-      <.link navigate={~p"/"} class="tv-nav-link tv-nav-link-active">Live</.link>
-      <.link navigate={~p"/guide"} class="tv-nav-link">TV-Programm</.link>
+      <.link navigate={~p"/"} class="tv-nav-link tv-nav-link-active">
+        <.icon name="hero-tv" class="size-5" /> Live
+      </.link>
+      <.link navigate={~p"/guide"} class="tv-nav-link">
+        <.icon name="hero-calendar-days" class="size-5" /> TV-Programm
+      </.link>
+      <.link
+        navigate={~p"/recordings"}
+        class={["tv-nav-link", @recording_active? && "tv-nav-link-recording"]}
+      >
+        <.icon name="hero-film" class="size-5" /> Aufnahmen
+        <span :if={@recording_active?} class="tv-nav-rec-dot" aria-label="Aufnahme läuft"></span>
+      </.link>
     </nav>
   </header>
 
@@ -88,6 +99,32 @@
               </span>
 
               <button
+                :if={@selected && !recording?(@current_recording)}
+                id="player-record-btn"
+                type="button"
+                class="tv-player-ctrl tv-player-record"
+                phx-click="record_now"
+                aria-label="Aktuelle Sendung aufnehmen"
+                title="Aufnehmen"
+              >
+                <span class="tv-rec-dot"></span>
+                <span class="tv-rec-label">REC</span>
+              </button>
+
+              <button
+                :if={@selected && recording?(@current_recording)}
+                id="player-stop-record-btn"
+                type="button"
+                class="tv-player-ctrl tv-player-record tv-player-record-active"
+                phx-click="stop_recording"
+                aria-label="Aufnahme stoppen"
+                title="Aufnahme stoppen"
+              >
+                <span class="tv-rec-dot tv-rec-dot-active"></span>
+                <span class="tv-rec-label">STOP</span>
+              </button>
+
+              <button
                 type="button"
                 class="tv-player-ctrl tv-player-fullscreen"
                 data-fullscreen
@@ -99,6 +136,15 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <div
+        :if={recording?(@current_recording)}
+        id="player-rec-badge"
+        class="tv-rec-badge"
+        role="status"
+      >
+        <span class="tv-rec-dot tv-rec-dot-active"></span> REC
       </div>
 
       <div
@@ -134,7 +180,7 @@
 
     <div :if={@selected} class="tv-now-next">
       <% epg = now_next(@now_map, @selected) %>
-      <div>
+      <div class="tv-now-block">
         <p class="tv-label">Jetzt</p>
         <p class="tv-programme">{programme_title(epg[:now])}</p>
         <p :if={epg[:now]} class="tv-programme-time">
@@ -147,6 +193,31 @@
         <p :if={epg[:next]} class="tv-programme-time">
           {format_time(epg[:next].starts_at)} – {format_time(epg[:next].ends_at)}
         </p>
+      </div>
+      <div class="tv-now-actions">
+        <button
+          :if={!recording?(@current_recording)}
+          id="now-record-btn"
+          type="button"
+          class="tv-button tv-button-record"
+          phx-click="record_now"
+        >
+          <span class="tv-rec-dot"></span> Aufnehmen
+        </button>
+        <button
+          :if={recording?(@current_recording)}
+          id="now-stop-record-btn"
+          type="button"
+          class="tv-button tv-button-record tv-button-record-active"
+          phx-click="stop_recording"
+        >
+          <span class="tv-rec-dot tv-rec-dot-active"></span>
+          <%= if @current_recording.state == :recording do %>
+            Aufnahme läuft · Stoppen
+          <% else %>
+            Geplant · Abbrechen
+          <% end %>
+        </button>
       </div>
     </div>
   </section>
@@ -212,4 +283,6 @@
       Keine Kanäle entsprechen der Suche.
     </p>
   </section>
+
+  <Layouts.flash_group flash={@flash} />
 </div>

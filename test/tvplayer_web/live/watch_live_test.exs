@@ -124,4 +124,23 @@ defmodule TvplayerWeb.WatchLiveTest do
     assert render(view) =~ "ORF 1"
     assert render(view) =~ "Evening News"
   end
+
+  test "player shows record button for current show", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/?channel=live-channel")
+
+    assert has_element?(view, "#now-record-btn")
+    assert has_element?(view, "a[href='/recordings']")
+  end
+
+  test "guide detail offers record action", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/guide")
+
+    view |> element("#epg-prog-1") |> render_click()
+    assert has_element?(view, "#programme-detail")
+    assert has_element?(view, "#detail-record-btn")
+
+    view |> element("#detail-record-btn") |> render_click()
+    assert has_element?(view, "#record-padding-panel")
+    assert has_element?(view, "#detail-confirm-record-btn")
+  end
 end

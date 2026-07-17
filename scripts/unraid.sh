@@ -16,6 +16,7 @@ cd "$ROOT"
 APP_NAME="${TVPLAYER_APP_CONTAINER:-tvplayer}"
 IMAGE="${TVPLAYER_IMAGE:-tvplayer:latest}"
 HLS_VOLUME="${TVPLAYER_HLS_VOLUME:-tvplayer-hls}"
+TRANSCODE_VOLUME="${TVPLAYER_TRANSCODE_VOLUME:-tvplayer-transcodes}"
 
 load_env() {
   if [[ -f .env ]]; then
@@ -49,6 +50,10 @@ load_env() {
   STREAM_COPY_STARTUP_TIMEOUT_MS="${STREAM_COPY_STARTUP_TIMEOUT_MS:-120000}"
   STREAM_MAX_CONCURRENT="${STREAM_MAX_CONCURRENT:-8}"
   HOT_CHANNELS="${HOT_CHANNELS:-1}"
+  TRANSCODE_THREADS="${TRANSCODE_THREADS:-4}"
+  TRANSCODE_PRESET="${TRANSCODE_PRESET:-veryfast}"
+  TRANSCODE_CRF="${TRANSCODE_CRF:-23}"
+  TRANSCODE_AUDIO_BITRATE="${TRANSCODE_AUDIO_BITRATE:-160k}"
 
   if [[ -z "${SECRET_KEY_BASE:-}" || "$SECRET_KEY_BASE" == "replace-me-with-output-of-mix-phx-gen-secret" ]]; then
     echo "ERROR: Set SECRET_KEY_BASE in .env (openssl rand -base64 48)" >&2
@@ -72,6 +77,7 @@ cmd_start() {
     --restart unless-stopped \
     -p "${PORT}:4000" \
     -v "${HLS_VOLUME}:/data/hls" \
+    -v "${TRANSCODE_VOLUME}:/data/transcodes" \
     -e PHX_SERVER=true \
     -e PORT=4000 \
     -e PHX_HOST="$PHX_HOST" \
@@ -83,6 +89,7 @@ cmd_start() {
     -e TVHEADEND_AUTH="$TVHEADEND_AUTH" \
     -e TVHEADEND_TIMEOUT_MS="$TVHEADEND_TIMEOUT_MS" \
     -e HLS_ROOT=/data/hls \
+    -e TRANSCODE_ROOT=/data/transcodes \
     -e FFMPEG_PATH="$FFMPEG_PATH" \
     -e FFMPEG_PRESET="$FFMPEG_PRESET" \
     -e FFMPEG_CRF="$FFMPEG_CRF" \
@@ -97,6 +104,10 @@ cmd_start() {
     -e STREAM_COPY_STARTUP_TIMEOUT_MS="$STREAM_COPY_STARTUP_TIMEOUT_MS" \
     -e STREAM_MAX_CONCURRENT="$STREAM_MAX_CONCURRENT" \
     -e HOT_CHANNELS="$HOT_CHANNELS" \
+    -e TRANSCODE_THREADS="$TRANSCODE_THREADS" \
+    -e TRANSCODE_PRESET="$TRANSCODE_PRESET" \
+    -e TRANSCODE_CRF="$TRANSCODE_CRF" \
+    -e TRANSCODE_AUDIO_BITRATE="$TRANSCODE_AUDIO_BITRATE" \
     "$IMAGE"
 
   echo "Started. Open http://${PHX_HOST}:${PORT}"

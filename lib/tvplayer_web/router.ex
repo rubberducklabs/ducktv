@@ -19,6 +19,12 @@ defmodule TvplayerWeb.Router do
 
     live "/", WatchLive
     live "/guide", GuideLive
+    live "/recordings", RecordingsLive
+    live "/share/:token", SharedRecordingLive
+    get "/share/:token/media", SharedRecordingController, :media
+    get "/share/:token/download", SharedRecordingController, :download
+    get "/recordings/:uuid/download", RecordingController, :download
+    get "/recordings/:uuid/media", RecordingController, :media
     get "/icons/*path", IconController, :show
   end
 

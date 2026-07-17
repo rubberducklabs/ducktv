@@ -16,6 +16,7 @@ services:
       - "${PORT:-4000}:4000"
     volumes:
       - hls-data:/data/hls
+      - transcode-data:/data/transcodes
     environment:
       PHX_SERVER: "true"
       PORT: ${PORT:-4000}
@@ -30,6 +31,7 @@ services:
       TVHEADEND_TIMEOUT_MS: ${TVHEADEND_TIMEOUT_MS:-10000}
 
       HLS_ROOT: /data/hls
+      TRANSCODE_ROOT: /data/transcodes
       FFMPEG_PATH: ${FFMPEG_PATH:-ffmpeg}
       FFMPEG_PRESET: ${FFMPEG_PRESET:-veryfast}
       FFMPEG_CRF: ${FFMPEG_CRF:-20}
@@ -44,6 +46,11 @@ services:
       STREAM_COPY_STARTUP_TIMEOUT_MS: ${STREAM_COPY_STARTUP_TIMEOUT_MS:-120000}
       STREAM_MAX_CONCURRENT: ${STREAM_MAX_CONCURRENT:-8}
       HOT_CHANNELS: ${HOT_CHANNELS:-1}
+      TRANSCODE_THREADS: ${TRANSCODE_THREADS:-4}
+      TRANSCODE_PRESET: ${TRANSCODE_PRESET:-veryfast}
+      TRANSCODE_CRF: ${TRANSCODE_CRF:-23}
+      TRANSCODE_AUDIO_BITRATE: ${TRANSCODE_AUDIO_BITRATE:-160k}
 
 volumes:
   hls-data:
+  transcode-data:

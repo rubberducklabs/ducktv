@@ -1,0 +1,902 @@
+<div class="tv-shell">
+  <header class="tv-header">
+    <div>
+      <p class="tv-brand">TV Player</p>
+      <h1 class="tv-title">Aufnahmen</h1>
+    </div>
+    <nav class="tv-nav" aria-label="Hauptnavigation">
+      <.link navigate={~p"/"} class="tv-nav-link">
+        <.icon name="hero-tv" class="size-5" /> Live
+      </.link>
+      <.link navigate={~p"/guide"} class="tv-nav-link">
+        <.icon name="hero-calendar-days" class="size-5" /> TV-Programm
+      </.link>
+      <.link
+        navigate={~p"/recordings"}
+        class={[
+          "tv-nav-link",
+          "tv-nav-link-active",
+          @recording_active? && "tv-nav-link-recording"
+        ]}
+      >
+        <.icon name="hero-film" class="size-5" /> Aufnahmen
+        <span :if={@recording_active?} class="tv-nav-rec-dot" aria-label="Aufnahme läuft"></span>
+      </.link>
+    </nav>
+  </header>
+
+  <section class="tv-recordings-toolbar" aria-label="Aufnahmen steuern">
+    <div class="tv-filter-chips" role="tablist" aria-label="Filter">
+      <button
+        :for={filter <- [:all, :scheduled, :recording, :completed, :failed, :removed]}
+        type="button"
+        id={"recordings-filter-#{filter}"}
+        role="tab"
+        aria-selected={to_string(@filter == filter)}
+        class={["tv-chip", @filter == filter && "tv-chip-active"]}
+        phx-click="filter"
+        phx-value-filter={filter}
+      >
+        {filter_label(filter)}
+        <span class="tv-chip-count">{Map.get(@filter_counts, filter, 0)}</span>
+      </button>
+    </div>
+
+    <button id="new-recording-btn" type="button" class="tv-button" phx-click="open_new">
+      + Neue Aufnahme
+    </button>
+  </section>
+
+  <section class="tv-recordings-list" aria-label="Aufnahmenliste">
+    <article
+      :for={recording <- @filtered_recordings}
+      id={"recording-#{recording.uuid}"}
+      class={["tv-recording-card", "tv-recording-#{recording.state}"]}
+    >
+      <div class="tv-recording-main">
+        <div class="tv-recording-channel">
+          <img
+            :if={channel_icon(@channels, recording.channel_uuid)}
+            src={channel_icon(@channels, recording.channel_uuid)}
+            alt=""
+            class="tv-channel-logo"
+            loading="lazy"
+          />
+          <span class="tv-recording-channel-name">
+            {recording.channel_name || "Unbekannter Kanal"}
+          </span>
+        </div>
+
+        <h2 class="tv-recording-title">{recording.title}</h2>
+        <p :if={recording.subtitle} class="tv-recording-subtitle">{recording.subtitle}</p>
+
+        <p class="tv-recording-meta">
+          <span>{format_time_range(recording.starts_at, recording.ends_at)}</span>
+          <span :if={padding_label(recording)} class="tv-recording-padding">
+            · {padding_label(recording)}
+          </span>
+          <span :if={format_filesize(recording.filesize)} class="tv-recording-size">
+            · {format_filesize(recording.filesize)}
+          </span>
+        </p>
+
+        <p
+          :if={recording.state in [:failed, :removed] && recording.status}
+          class="tv-recording-error"
+        >
+          {recording.status}
+        </p>
+
+        <div
+          :if={transcode_status(@transcodes, recording.uuid) not in [nil, :done]}
+          id={"transcode-progress-#{recording.uuid}"}
+          class="tv-transcode-progress"
+        >
+          <div class="tv-transcode-progress-header">
+            <span class={[
+              "tv-transcode-label",
+              match?({:failed, _}, transcode_status(@transcodes, recording.uuid)) &&
+                "tv-transcode-label-failed"
+            ]}>
+              {transcode_label(transcode_status(@transcodes, recording.uuid))}
+            </span>
+            <div class="tv-transcode-actions">
+              <button
+                :if={transcode_cancellable?(transcode_status(@transcodes, recording.uuid))}
+                type="button"
+                id={"cancel-transcode-#{recording.uuid}"}
+                class="tv-button tv-button-secondary tv-button-small"
+                phx-click="cancel_transcode"
+                phx-value-uuid={recording.uuid}
+              >
+                Abbrechen
+              </button>
+              <button
+                :if={match?({:failed, _}, transcode_status(@transcodes, recording.uuid))}
+                type="button"
+                id={"retry-transcode-#{recording.uuid}"}
+                class="tv-button tv-button-secondary tv-button-small"
+                phx-click="retry_transcode"
+                phx-value-uuid={recording.uuid}
+              >
+                Erneut versuchen
+              </button>
+            </div>
+          </div>
+          <div
+            :if={transcode_percent(transcode_status(@transcodes, recording.uuid)) != nil}
+            class="tv-progress-track"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow={transcode_percent(transcode_status(@transcodes, recording.uuid))}
+          >
+            <div
+              class="tv-progress-fill"
+              style={"width: #{transcode_percent(transcode_status(@transcodes, recording.uuid))}%"}
+            >
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tv-recording-side">
+        <span class={["tv-state-badge", "tv-state-#{recording.state}"]}>
+          {state_label(recording.state)}
+        </span>
+
+        <div class="tv-recording-actions">
+          <button
+            :if={downloadable?(recording)}
+            type="button"
+            id={"watch-#{recording.uuid}"}
+            class={[
+              "tv-button",
+              transcode_status(@transcodes, recording.uuid) == :done && "tv-button-ready"
+            ]}
+            phx-click="watch_recording"
+            phx-value-uuid={recording.uuid}
+          >
+            {watch_button_label(transcode_status(@transcodes, recording.uuid))}
+          </button>
+
+          <button
+            :if={transcode_status(@transcodes, recording.uuid) == :done}
+            type="button"
+            id={"share-#{recording.uuid}"}
+            class="tv-button tv-button-secondary"
+            phx-click="open_share"
+            phx-value-uuid={recording.uuid}
+          >
+            Teilen
+          </button>
+
+          <div
+            :if={downloadable?(recording)}
+            class="tv-download-menu"
+            id={"download-menu-#{recording.uuid}"}
+            phx-click-away="close_download_menu"
+          >
+            <button
+              type="button"
+              id={"download-#{recording.uuid}"}
+              class="tv-button tv-button-secondary"
+              phx-click="toggle_download_menu"
+              phx-value-uuid={recording.uuid}
+              aria-expanded={to_string(@download_menu_uuid == recording.uuid)}
+              aria-haspopup="menu"
+            >
+              Herunterladen ▾
+            </button>
+
+            <div
+              :if={@download_menu_uuid == recording.uuid}
+              class="tv-download-dropdown"
+              id={"download-dropdown-#{recording.uuid}"}
+              role="menu"
+            >
+              <a
+                id={"download-original-#{recording.uuid}"}
+                href={~p"/recordings/#{recording.uuid}/download"}
+                class="tv-download-option"
+                download={download_filename(recording)}
+                role="menuitem"
+              >
+                <span class="tv-download-option-title">Original</span>
+                <span class="tv-download-option-hint">Unveränderte Aufnahme</span>
+              </a>
+
+              <a
+                :if={transcode_status(@transcodes, recording.uuid) == :done}
+                id={"download-web-#{recording.uuid}"}
+                href={~p"/recordings/#{recording.uuid}/download?variant=compressed"}
+                class="tv-download-option"
+                download={web_download_filename(recording)}
+                role="menuitem"
+              >
+                <span class="tv-download-option-title">Web-Version</span>
+                <span class="tv-download-option-hint">Kleinere Datei, im Browser abspielbar</span>
+              </a>
+
+              <button
+                :if={transcode_status(@transcodes, recording.uuid) != :done}
+                type="button"
+                id={"create-web-#{recording.uuid}"}
+                class="tv-download-option"
+                phx-click="start_web_version"
+                phx-value-uuid={recording.uuid}
+                role="menuitem"
+              >
+                <span class="tv-download-option-title">Web-Version</span>
+                <span class="tv-download-option-hint">
+                  <%= cond do %>
+                    <% match?({:running, _}, transcode_status(@transcodes, recording.uuid)) -> %>
+                      Wird konvertiert…
+                    <% transcode_status(@transcodes, recording.uuid) == :queued -> %>
+                      In Warteschlange…
+                    <% match?({:failed, _}, transcode_status(@transcodes, recording.uuid)) -> %>
+                      Erneut konvertieren
+                    <% true -> %>
+                      Kleinere Datei erstellen
+                  <% end %>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <button
+            :if={recording.state == :scheduled}
+            type="button"
+            class="tv-button tv-button-secondary"
+            phx-click="open_edit"
+            phx-value-uuid={recording.uuid}
+          >
+            Bearbeiten
+          </button>
+
+          <button
+            :if={recording.state in [:scheduled, :recording]}
+            type="button"
+            class="tv-button tv-button-record tv-button-record-active"
+            phx-click="cancel_recording"
+            phx-value-uuid={recording.uuid}
+          >
+            {if recording.state == :recording, do: "Stoppen", else: "Abbrechen"}
+          </button>
+
+          <button
+            :if={
+              recording.state in [:completed, :failed, :removed] &&
+                @confirm_delete_uuid != recording.uuid
+            }
+            type="button"
+            class="tv-button tv-button-secondary"
+            phx-click="confirm_delete"
+            phx-value-uuid={recording.uuid}
+          >
+            Löschen
+          </button>
+
+          <div
+            :if={@confirm_delete_uuid == recording.uuid}
+            class="tv-confirm-delete"
+            id={"confirm-delete-#{recording.uuid}"}
+          >
+            <button
+              type="button"
+              class="tv-button tv-button-danger"
+              phx-click="delete_recording"
+              phx-value-uuid={recording.uuid}
+            >
+              Wirklich löschen
+            </button>
+            <button type="button" class="tv-button tv-button-secondary" phx-click="cancel_delete">
+              Nein
+            </button>
+          </div>
+
+          <button
+            :if={recording.channel_uuid}
+            type="button"
+            class="tv-button tv-button-secondary"
+            phx-click="watch_channel"
+            phx-value-uuid={recording.channel_uuid}
+          >
+            Kanal ansehen
+          </button>
+        </div>
+      </div>
+    </article>
+
+    <p :if={@filtered_recordings == []} id="recordings-empty" class="tv-empty">
+      <%= if @filter == :all do %>
+        Noch keine Aufnahmen. Plane eine über das TV-Programm oder „Neue Aufnahme“.
+      <% else %>
+        Keine Aufnahmen in dieser Kategorie.
+      <% end %>
+    </p>
+  </section>
+
+  <%!-- Edit modal --%>
+  <div
+    :if={@edit}
+    id="edit-recording-modal"
+    class="tv-modal-backdrop"
+    phx-window-keydown="close_edit"
+    phx-key="Escape"
+  >
+    <div class="tv-modal" role="dialog" aria-modal="true" aria-labelledby="edit-recording-title">
+      <h2 id="edit-recording-title" class="tv-modal-title">Aufnahme bearbeiten</h2>
+      <p class="tv-modal-subtitle">{@edit.title}</p>
+
+      <form id="edit-recording-form" phx-submit="save_edit" class="tv-form-grid">
+        <label class="tv-field">
+          <span class="tv-label">Start</span>
+          <input
+            type="datetime-local"
+            name="start"
+            class="tv-input"
+            value={to_datetime_local(@edit.starts_at)}
+            required
+          />
+        </label>
+        <label class="tv-field">
+          <span class="tv-label">Ende</span>
+          <input
+            type="datetime-local"
+            name="stop"
+            class="tv-input"
+            value={to_datetime_local(@edit.ends_at)}
+            required
+          />
+        </label>
+
+        <div class="tv-field">
+          <span class="tv-label">Vorlauf</span>
+          <div class="tv-chip-row">
+            <button
+              :for={minutes <- @padding_options}
+              type="button"
+              class={["tv-chip", chip_active?(@edit_start_extra, minutes) && "tv-chip-active"]}
+              phx-click="set_edit_start_extra"
+              phx-value-minutes={minutes}
+            >
+              {minutes} Min
+            </button>
+          </div>
+        </div>
+
+        <div class="tv-field">
+          <span class="tv-label">Nachlauf</span>
+          <div class="tv-chip-row">
+            <button
+              :for={minutes <- @padding_options}
+              type="button"
+              class={["tv-chip", chip_active?(@edit_stop_extra, minutes) && "tv-chip-active"]}
+              phx-click="set_edit_stop_extra"
+              phx-value-minutes={minutes}
+            >
+              {minutes} Min
+            </button>
+          </div>
+        </div>
+
+        <div class="tv-modal-actions">
+          <button type="submit" class="tv-button">Speichern</button>
+          <button type="button" class="tv-button tv-button-secondary" phx-click="close_edit">
+            Abbrechen
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <%!-- New recording modal --%>
+  <div
+    :if={@new_form_open?}
+    id="new-recording-modal"
+    class="tv-modal-backdrop"
+    phx-window-keydown="close_new"
+    phx-key="Escape"
+  >
+    <div
+      class="tv-modal tv-modal-wide"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-recording-title"
+    >
+      <h2 id="new-recording-title" class="tv-modal-title">Neue Aufnahme</h2>
+
+      <form
+        id="recording-form"
+        phx-change="validate_new"
+        phx-submit="create_recording"
+        class="tv-form-grid"
+      >
+        <div class="tv-field">
+          <span class="tv-label">Kanal</span>
+
+          <div :if={@selected_channel} class="tv-selected-channel" id="selected-channel-chip">
+            <span>
+              {if @selected_channel.number, do: "#{@selected_channel.number} · "}{@selected_channel.name}
+            </span>
+            <button
+              type="button"
+              class="tv-chip-clear"
+              phx-click="clear_channel"
+              aria-label="Kanal entfernen"
+            >
+              ×
+            </button>
+          </div>
+
+          <div :if={!@selected_channel}>
+            <label for="channel-picker-search" class="sr-only">Kanal suchen</label>
+            <input
+              id="channel-picker-search"
+              type="search"
+              name="q"
+              value={@channel_query}
+              phx-debounce="200"
+              placeholder="Kanal suchen…"
+              class="tv-input"
+              autocomplete="off"
+            />
+            <div class="tv-channel-picker" id="channel-picker-results">
+              <button
+                :for={channel <- filtered_channels(@channels, @channel_query)}
+                type="button"
+                class="tv-channel-picker-row"
+                id={"pick-channel-#{channel.uuid}"}
+                phx-click="select_channel"
+                phx-value-uuid={channel.uuid}
+              >
+                <img
+                  :if={icon_url(channel.icon_path)}
+                  src={icon_url(channel.icon_path)}
+                  alt=""
+                  class="tv-channel-logo"
+                  loading="lazy"
+                />
+                <span class="tv-channel-number">{channel.number || "–"}</span>
+                <span class="tv-channel-name">{channel.name}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tv-field">
+          <span class="tv-label">Datum</span>
+          <div class="tv-chip-row" id="form-day-chips">
+            <button
+              :for={{day, label} <- day_options()}
+              type="button"
+              class={[
+                "tv-chip",
+                !@form_custom_day? && chip_active?(@form_day, day) && "tv-chip-active"
+              ]}
+              phx-click="set_form_day"
+              phx-value-day={Date.to_iso8601(day)}
+            >
+              {label}
+            </button>
+            <button
+              type="button"
+              id="form-day-custom"
+              class={["tv-chip", @form_custom_day? && "tv-chip-active"]}
+              phx-click="set_form_custom_day"
+            >
+              Andere…
+            </button>
+          </div>
+          <label :if={@form_custom_day?} class="tv-field" id="form-custom-date-field">
+            <span class="sr-only">Datum wählen</span>
+            <input
+              id="form-date"
+              type="date"
+              name="date"
+              value={Date.to_iso8601(@form_day)}
+              min={Date.to_iso8601(today())}
+              class="tv-input"
+              required
+            />
+          </label>
+        </div>
+
+        <div class="tv-field-row">
+          <label class="tv-field">
+            <span class="tv-label">Startzeit</span>
+            <input
+              id="form-start-time"
+              type="text"
+              name="start_time"
+              value={@form_start_time}
+              class="tv-input"
+              placeholder="HH:MM"
+              pattern="([01][0-9]|2[0-3]):[0-5][0-9]"
+              inputmode="numeric"
+              maxlength="5"
+              autocomplete="off"
+              phx-debounce="400"
+              required
+            />
+          </label>
+
+          <label class="tv-field">
+            <span class="tv-label">Endzeit</span>
+            <input
+              id="form-end-time"
+              type="text"
+              name="end_time"
+              value={@form_end_time}
+              class="tv-input"
+              placeholder="HH:MM"
+              pattern="([01][0-9]|2[0-3]):[0-5][0-9]"
+              inputmode="numeric"
+              maxlength="5"
+              autocomplete="off"
+              phx-debounce="400"
+              required
+            />
+          </label>
+        </div>
+
+        <div class="tv-field">
+          <span class="tv-label">Dauer</span>
+          <div class="tv-chip-row" id="form-duration-chips">
+            <button
+              :for={minutes <- @duration_options}
+              type="button"
+              class={["tv-chip", chip_active?(@form_duration, minutes) && "tv-chip-active"]}
+              phx-click="set_form_duration"
+              phx-value-minutes={minutes}
+            >
+              {minutes} Min
+            </button>
+          </div>
+          <p class="tv-help">
+            {if @form_duration in @duration_options,
+              do: "#{@form_duration} Min",
+              else: "Individuell · #{@form_duration} Min"}
+          </p>
+        </div>
+
+        <div class="tv-field">
+          <span class="tv-label">Vorlauf</span>
+          <div class="tv-chip-row">
+            <button
+              :for={minutes <- @padding_options}
+              type="button"
+              class={["tv-chip", chip_active?(@form_start_extra, minutes) && "tv-chip-active"]}
+              phx-click="set_form_start_extra"
+              phx-value-minutes={minutes}
+            >
+              {minutes} Min
+            </button>
+          </div>
+        </div>
+
+        <div class="tv-field">
+          <span class="tv-label">Nachlauf</span>
+          <div class="tv-chip-row">
+            <button
+              :for={minutes <- @padding_options}
+              type="button"
+              class={["tv-chip", chip_active?(@form_stop_extra, minutes) && "tv-chip-active"]}
+              phx-click="set_form_stop_extra"
+              phx-value-minutes={minutes}
+            >
+              {minutes} Min
+            </button>
+          </div>
+        </div>
+
+        <label class="tv-field">
+          <span class="tv-label">Titel (optional)</span>
+          <input
+            id="form-title"
+            type="text"
+            name="title"
+            value={@form_title}
+            class="tv-input"
+            placeholder="z. B. Tatort"
+            autocomplete="off"
+          />
+        </label>
+
+        <p :if={@form_error} id="recording-form-error" class="tv-form-error" role="alert">
+          {@form_error}
+        </p>
+
+        <div class="tv-modal-actions">
+          <button type="submit" class="tv-button tv-button-record" id="recording-form-submit">
+            <span class="tv-rec-dot"></span> Aufnahme planen
+          </button>
+          <button type="button" class="tv-button tv-button-secondary" phx-click="close_new">
+            Abbrechen
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <%!-- Share modal --%>
+  <div
+    :if={@share_uuid && @share_url}
+    id="share-recording-modal"
+    class="tv-modal-backdrop"
+    phx-window-keydown="close_share"
+    phx-key="Escape"
+  >
+    <div
+      class="tv-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="share-recording-title"
+      id="share-recording-dialog"
+      phx-hook=".CopyShareLink"
+    >
+      <h2 id="share-recording-title" class="tv-modal-title">Aufnahme teilen</h2>
+      <p class="tv-modal-subtitle">
+        Jeder mit diesem Link kann die Web-Version ansehen und herunterladen — ohne Anmeldung.
+        Gültig {share_validity_label()}.
+      </p>
+
+      <label class="tv-field" for="share-link-input">
+        <span class="tv-label">Link</span>
+        <input
+          id="share-link-input"
+          class="tv-input"
+          type="text"
+          readonly
+          value={@share_url}
+          data-share-url
+        />
+      </label>
+
+      <div class="tv-modal-actions">
+        <button type="button" id="copy-share-link" class="tv-button" data-copy-share>
+          Link kopieren
+        </button>
+        <a
+          id="open-share-link"
+          href={@share_url}
+          class="tv-button tv-button-secondary"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Öffnen
+        </a>
+        <button type="button" class="tv-button tv-button-secondary" phx-click="close_share">
+          Schließen
+        </button>
+      </div>
+      <p id="share-copy-status" class="tv-help" data-copy-status hidden>Link kopiert.</p>
+    </div>
+
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".CopyShareLink">
+      export default {
+        mounted() {
+          this.btn = this.el.querySelector("[data-copy-share]")
+          this.input = this.el.querySelector("[data-share-url]")
+          this.status = this.el.querySelector("[data-copy-status]")
+
+          this.btn?.addEventListener("click", async () => {
+            const text = this.input?.value || ""
+            try {
+              await navigator.clipboard.writeText(text)
+            } catch (_err) {
+              this.input?.select()
+              document.execCommand("copy")
+            }
+            if (this.status) {
+              this.status.hidden = false
+              clearTimeout(this.hideTimer)
+              this.hideTimer = setTimeout(() => { this.status.hidden = true }, 2000)
+            }
+          })
+        },
+
+        destroyed() {
+          clearTimeout(this.hideTimer)
+        }
+      }
+    </script>
+  </div>
+
+  <%!-- Cinema playback --%>
+  <div
+    :if={playing_recording(@playing_uuid, @recordings)}
+    id="recording-player-modal"
+    class="tv-cinema-backdrop"
+    phx-window-keydown="close_player"
+    phx-key="Escape"
+  >
+    <% recording = playing_recording(@playing_uuid, @recordings) %>
+    <div
+      class="tv-cinema"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="recording-player-title"
+    >
+      <%!-- phx-update="ignore": keep <video> and custom chrome stable across LiveView diffs. --%>
+      <div
+        id={"recording-cinema-#{@playing_uuid}"}
+        class="tv-cinema-stage"
+        phx-hook="RecordingPlayer"
+        phx-update="ignore"
+        tabindex="0"
+        role="region"
+        aria-label="Aufnahme abspielen"
+      >
+        <video
+          id={"recording-video-#{@playing_uuid}"}
+          class="tv-cinema-video"
+          playsinline
+          preload="metadata"
+          src={~p"/recordings/#{@playing_uuid}/media"}
+        ></video>
+
+        <div class="tv-player-ui" data-player-ui>
+          <div class="tv-cinema-top is-visible" data-top-chrome>
+            <div class="tv-cinema-meta">
+              <p class="tv-cinema-eyebrow">Aufnahme</p>
+              <h2 id="recording-player-title" class="tv-cinema-title">
+                {recording.title}
+              </h2>
+              <p :if={recording.subtitle} class="tv-cinema-subtitle">
+                {recording.subtitle}
+              </p>
+              <div class="tv-cinema-details">
+                <span
+                  :if={channel_icon(@channels, recording.channel_uuid)}
+                  class="tv-cinema-channel"
+                >
+                  <img
+                    src={channel_icon(@channels, recording.channel_uuid)}
+                    alt=""
+                    class="tv-cinema-channel-logo"
+                  />
+                  {recording.channel_name || "Kanal"}
+                </span>
+                <span
+                  :if={!channel_icon(@channels, recording.channel_uuid)}
+                  class="tv-cinema-channel"
+                >
+                  {recording.channel_name || "Kanal"}
+                </span>
+                <span class="tv-cinema-dot" aria-hidden="true">·</span>
+                <span>{format_time_range(recording.starts_at, recording.ends_at)}</span>
+                <span
+                  :if={format_filesize(recording.filesize)}
+                  class="tv-cinema-dot"
+                  aria-hidden="true"
+                >
+                  ·
+                </span>
+                <span :if={format_filesize(recording.filesize)}>
+                  {format_filesize(recording.filesize)}
+                </span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              id="close-recording-player"
+              class="tv-cinema-close"
+              data-close
+              aria-label="Schließen"
+            >
+              <.icon name="hero-x-mark" class="size-6" />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            class="tv-player-big-play"
+            data-big-play
+            hidden
+            aria-label="Abspielen"
+          >
+            <span class="hero-play-solid size-12"></span>
+          </button>
+
+          <div class="tv-player-chrome is-visible" data-chrome>
+            <div class="tv-player-progress">
+              <label class="sr-only" for={"recording-seek-#{@playing_uuid}"}>Position</label>
+              <input
+                id={"recording-seek-#{@playing_uuid}"}
+                class="tv-player-seek"
+                type="range"
+                min="0"
+                max="1"
+                step="0.001"
+                value="0"
+                data-seek
+                aria-label="Wiedergabeposition"
+              />
+              <div class="tv-player-time">
+                <span data-current-time>0:00</span>
+                <span class="tv-player-time-sep" aria-hidden="true">/</span>
+                <span data-duration>0:00</span>
+              </div>
+            </div>
+
+            <div class="tv-player-chrome-bar">
+              <button
+                type="button"
+                class="tv-player-ctrl"
+                data-play-pause
+                aria-label="Abspielen"
+              >
+                <span class="hero-play-solid size-7" data-icon-play></span>
+                <span class="hero-pause-solid size-7" data-icon-pause hidden></span>
+              </button>
+
+              <button
+                type="button"
+                class="tv-player-ctrl tv-player-skip"
+                data-skip-back
+                aria-label="10 Sekunden zurück"
+              >
+                <span class="tv-player-skip-label">−10</span>
+              </button>
+
+              <button
+                type="button"
+                class="tv-player-ctrl tv-player-skip"
+                data-skip-forward
+                aria-label="10 Sekunden vor"
+              >
+                <span class="tv-player-skip-label">+10</span>
+              </button>
+
+              <div class="tv-player-volume">
+                <button
+                  type="button"
+                  class="tv-player-ctrl"
+                  data-mute
+                  aria-label="Stummschalten"
+                >
+                  <span class="hero-speaker-wave-solid size-6" data-icon-unmuted></span>
+                  <span class="hero-speaker-x-mark-solid size-6" data-icon-muted hidden></span>
+                </button>
+                <label class="sr-only" for={"recording-volume-#{@playing_uuid}"}>
+                  Lautstärke
+                </label>
+                <input
+                  id={"recording-volume-#{@playing_uuid}"}
+                  class="tv-player-volume-slider"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value="1"
+                  data-volume
+                  aria-label="Lautstärke"
+                />
+              </div>
+
+              <span class="tv-player-vod" aria-label="Aufnahme">
+                <span class="hero-film-solid size-5"></span>
+                <span>AUFNAHME</span>
+              </span>
+
+              <button
+                type="button"
+                class="tv-player-ctrl tv-player-fullscreen"
+                data-fullscreen
+                aria-label="Vollbild"
+              >
+                <span class="hero-arrows-pointing-out-solid size-6" data-icon-fs-enter></span>
+                <span class="hero-arrows-pointing-in-solid size-6" data-icon-fs-exit hidden></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <Layouts.flash_group flash={@flash} />
+</div>

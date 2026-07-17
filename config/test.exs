@@ -53,4 +53,14 @@ config :tvplayer,
     max_concurrent: 4,
     hot_channels: [],
     runner: Tvplayer.Streams.FakeRunner
+  ],
+  transcodes: [
+    root: "tmp/transcodes_test",
+    ffmpeg_path: "ffmpeg",
+    ffprobe_path: "ffprobe",
+    threads: 4,
+    preset: "veryfast",
+    crf: 23,
+    audio_bitrate: "160k",
+    runner: Tvplayer.Recordings.FakeRunner
   ]

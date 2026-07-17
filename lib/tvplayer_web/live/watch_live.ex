@@ -2,18 +2,20 @@ defmodule TvplayerWeb.WatchLive do
   use TvplayerWeb, :live_view
 
   alias Tvplayer.Streams.{Manager, Session}
-  alias Tvplayer.Tvheadend.{Cache, Programme}
+  alias Tvplayer.Tvheadend.{Cache, Dvr, Programme, Recording}
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Tvplayer.PubSub, Cache.channels_topic())
       Phoenix.PubSub.subscribe(Tvplayer.PubSub, Cache.epg_topic())
+      Phoenix.PubSub.subscribe(Tvplayer.PubSub, Cache.dvr_topic())
       Phoenix.PubSub.subscribe(Tvplayer.PubSub, Session.all_topic())
     end
 
     channels = Cache.list_channels()
     now_map = Cache.now_map()
+    recordings = Cache.recordings()
 
     encoder_statuses =
       if connected?(socket), do: Manager.session_statuses(), else: %{}
@@ -23,6 +25,9 @@ defmodule TvplayerWeb.WatchLive do
         page_title: "Fernsehen",
         channels: channels,
         now_map: now_map,
+        recordings: recordings,
+        recording_active?: Enum.any?(recordings, &(&1.state == :recording)),
+        current_recording: nil,
         selected: nil,
         stream_status: :idle,
         playlist_url: nil,
@@ -59,6 +64,61 @@ defmodule TvplayerWeb.WatchLive do
     {:noreply, assign(socket, filter: q)}
   end
 
+  def handle_event("record_now", _params, socket) do
+    case current_programme(socket) do
+      %Programme{event_id: event_id, title: title} ->
+        case Dvr.record_event(event_id) do
+          {:ok, recording} ->
+            {:noreply,
+             socket
+             |> assign_recordings(Cache.recordings())
+             |> assign(current_recording: recording || Cache.recording_for_event(event_id))
+             |> put_flash(:info, "Aufnahme gestartet: #{title}")}
+
+          {:error, reason} ->
+            {:noreply,
+             put_flash(socket, :error, "Aufnahme fehlgeschlagen: #{format_error(reason)}")}
+        end
+
+      nil ->
+        case record_manual_fallback(socket) do
+          {:ok, recording} ->
+            title = if recording, do: recording.title, else: "Kanal"
+
+            {:noreply,
+             socket
+             |> assign_recordings(Cache.recordings())
+             |> assign(current_recording: recording)
+             |> put_flash(:info, "Aufnahme gestartet: #{title}")}
+
+          {:error, reason} ->
+            {:noreply,
+             put_flash(socket, :error, "Aufnahme fehlgeschlagen: #{format_error(reason)}")}
+        end
+    end
+  end
+
+  def handle_event("stop_recording", _params, socket) do
+    case socket.assigns.current_recording do
+      %Recording{} = recording ->
+        case Dvr.cancel_or_stop(recording) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> assign_recordings(Cache.recordings())
+             |> assign(current_recording: nil)
+             |> put_flash(:info, "Aufnahme gestoppt")}
+
+          {:error, reason} ->
+            {:noreply,
+             put_flash(socket, :error, "Stoppen fehlgeschlagen: #{format_error(reason)}")}
+        end
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
   @impl true
   def handle_info({:channels_updated, channels}, socket) do
     socket = assign(socket, channels: channels)
@@ -77,7 +137,16 @@ defmodule TvplayerWeb.WatchLive do
   end
 
   def handle_info({:epg_updated, now_map}, socket) do
-    {:noreply, assign(socket, now_map: now_map)}
+    socket =
+      socket
+      |> assign(now_map: now_map)
+      |> sync_current_recording()
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:dvr_updated, recordings}, socket) do
+    {:noreply, assign_recordings(socket, recordings)}
   end
 
   def handle_info({:stream_status, info}, socket) do
@@ -121,17 +190,21 @@ defmodule TvplayerWeb.WatchLive do
       selected: nil,
       stream_status: :error,
       stream_error: "Keine Kanäle von TVHeadend verfügbar.",
-      playlist_url: nil
+      playlist_url: nil,
+      current_recording: nil
     )
   end
 
   defp maybe_start_channel(socket, channel) do
-    if socket.assigns[:watching_uuid] == channel.uuid and
-         socket.assigns[:stream_status] in [:ready, :starting] do
-      assign(socket, selected: channel, page_title: channel.name)
-    else
-      do_start_channel(socket, channel)
-    end
+    socket =
+      if socket.assigns[:watching_uuid] == channel.uuid and
+           socket.assigns[:stream_status] in [:ready, :starting] do
+        assign(socket, selected: channel, page_title: channel.name)
+      else
+        do_start_channel(socket, channel)
+      end
+
+    sync_current_recording(socket)
   end
 
   defp do_start_channel(socket, channel) do
@@ -141,8 +214,6 @@ defmodule TvplayerWeb.WatchLive do
       Manager.unwatch(old_uuid, self())
     end
 
-    # Update selection immediately so the UI does not wait on Manager.watch /
-    # Session.init (disk I/O, process start). Stream attach runs asynchronously.
     socket =
       put_stream_state(socket,
         selected: channel,
@@ -197,8 +268,6 @@ defmodule TvplayerWeb.WatchLive do
     end
   end
 
-  # Assign stream fields and notify the VideoPlayer hook without relying on
-  # DOM data-attribute patches (those re-triggered HLS reload / stutter).
   defp put_stream_state(socket, attrs) do
     socket
     |> assign(attrs)
@@ -215,6 +284,75 @@ defmodule TvplayerWeb.WatchLive do
       socket
     end
   end
+
+  defp assign_recordings(socket, recordings) do
+    socket
+    |> assign(
+      recordings: recordings,
+      recording_active?: Enum.any?(recordings, &(&1.state == :recording))
+    )
+    |> sync_current_recording()
+  end
+
+  defp sync_current_recording(socket) do
+    recording =
+      case current_programme(socket) do
+        %Programme{event_id: event_id} ->
+          Cache.recording_for_event(event_id) || channel_recording(socket)
+
+        nil ->
+          channel_recording(socket)
+      end
+
+    assign(socket, current_recording: recording)
+  end
+
+  defp channel_recording(socket) do
+    case socket.assigns.selected do
+      %{uuid: uuid} -> Cache.recording_for_channel(uuid)
+      _ -> nil
+    end
+  end
+
+  defp current_programme(socket) do
+    case socket.assigns.selected do
+      %{uuid: uuid} ->
+        case Map.get(socket.assigns.now_map, uuid) do
+          %{now: %Programme{} = programme} -> programme
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp record_manual_fallback(socket) do
+    case socket.assigns.selected do
+      %{uuid: uuid, name: name} = channel ->
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+        ends_at =
+          case current_programme(socket) do
+            %Programme{ends_at: ends_at} -> ends_at
+            _ -> DateTime.add(now, 2 * 3600, :second)
+          end
+
+        Dvr.create(%{
+          channel: uuid,
+          channel_name: name,
+          start: now,
+          stop: ends_at,
+          title: "Aufnahme · #{channel.name}"
+        })
+
+      _ ->
+        {:error, :no_channel}
+    end
+  end
+
+  defp format_error(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp format_error(reason), do: inspect(reason)
 
   defp filtered_channels(channels, ""), do: channels
 
@@ -271,4 +409,7 @@ defmodule TvplayerWeb.WatchLive do
   defp encoder_dot_label(:recording), do: "Aufnahme"
   defp encoder_dot_label(:error), do: "Encoder-Fehler"
   defp encoder_dot_label(_), do: "Encoder inaktiv"
+
+  defp recording?(nil), do: false
+  defp recording?(%Recording{state: state}), do: state in [:scheduled, :recording]
 end

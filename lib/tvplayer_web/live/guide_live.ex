@@ -1,21 +1,25 @@
 defmodule TvplayerWeb.GuideLive do
   use TvplayerWeb, :live_view
 
-  alias Tvplayer.Tvheadend.{Cache, Programme}
+  alias Tvplayer.Tvheadend.{Cache, Dvr, Programme, Recording}
 
   # 4px per minute → 1 hour = 240px, full day = 5760px
   @px_per_minute 4
   @day_minutes 24 * 60
   @timezone "Europe/Vienna"
+  @padding_options [0, 5, 10, 15]
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Tvplayer.PubSub, Cache.channels_topic())
+      Phoenix.PubSub.subscribe(Tvplayer.PubSub, Cache.dvr_topic())
     end
 
     day = today()
     channels = Cache.list_channels()
+    recordings = Cache.recordings()
+    padding = Cache.default_padding()
 
     socket =
       assign(socket,
@@ -26,6 +30,14 @@ defmodule TvplayerWeb.GuideLive do
         search: "",
         search_results: [],
         detail: nil,
+        detail_recording: nil,
+        record_panel?: false,
+        start_extra: padding.pre || 0,
+        stop_extra: padding.post || 0,
+        padding_options: @padding_options,
+        recordings: recordings,
+        recording_event_ids: recording_event_ids(recordings),
+        recording_active?: Enum.any?(recordings, &(&1.state == :recording)),
         loading: connected?(socket),
         error: nil,
         px_per_minute: @px_per_minute,
@@ -48,6 +60,8 @@ defmodule TvplayerWeb.GuideLive do
      assign(socket,
        day: day,
        detail: nil,
+       detail_recording: nil,
+       record_panel?: false,
        search: "",
        search_results: [],
        now_offset: now_offset_px(day),
@@ -65,6 +79,8 @@ defmodule TvplayerWeb.GuideLive do
      assign(socket,
        day: day,
        detail: nil,
+       detail_recording: nil,
+       record_panel?: false,
        search: "",
        search_results: [],
        now_offset: now_offset_px(day),
@@ -84,6 +100,8 @@ defmodule TvplayerWeb.GuideLive do
        search: "",
        search_results: [],
        detail: nil,
+       detail_recording: nil,
+       record_panel?: false,
        now_offset: now_offset_px(day),
        loading: true
      )}
@@ -116,15 +134,85 @@ defmodule TvplayerWeb.GuideLive do
       |> Enum.find(&(&1.event_id == id)) ||
         Enum.find(socket.assigns.search_results, &(&1.event_id == id))
 
-    {:noreply, assign(socket, detail: detail)}
+    recording =
+      detail && (Cache.recording_for_event(detail.event_id) || recording_from_programme(detail))
+
+    padding = Cache.default_padding()
+
+    {:noreply,
+     assign(socket,
+       detail: detail,
+       detail_recording: recording,
+       record_panel?: false,
+       start_extra: padding.pre || 0,
+       stop_extra: padding.post || 0
+     )}
   end
 
   def handle_event("close_detail", _params, socket) do
-    {:noreply, assign(socket, detail: nil)}
+    {:noreply, assign(socket, detail: nil, detail_recording: nil, record_panel?: false)}
   end
 
   def handle_event("watch_channel", %{"uuid" => uuid}, socket) do
     {:noreply, push_navigate(socket, to: ~p"/?channel=#{uuid}")}
+  end
+
+  def handle_event("open_record_panel", _params, socket) do
+    {:noreply, assign(socket, record_panel?: true)}
+  end
+
+  def handle_event("set_start_extra", %{"minutes" => minutes}, socket) do
+    {:noreply, assign(socket, start_extra: String.to_integer(minutes))}
+  end
+
+  def handle_event("set_stop_extra", %{"minutes" => minutes}, socket) do
+    {:noreply, assign(socket, stop_extra: String.to_integer(minutes))}
+  end
+
+  def handle_event("confirm_record", _params, socket) do
+    case socket.assigns.detail do
+      %Programme{event_id: event_id, title: title} ->
+        case Dvr.record_event(event_id,
+               start_extra: socket.assigns.start_extra,
+               stop_extra: socket.assigns.stop_extra
+             ) do
+          {:ok, recording} ->
+            {:noreply,
+             socket
+             |> assign_recordings(Cache.recordings())
+             |> assign(
+               detail_recording: recording || Cache.recording_for_event(event_id),
+               record_panel?: false
+             )
+             |> put_flash(:info, "Aufnahme geplant: #{title}")}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Aufnahme fehlgeschlagen: #{inspect(reason)}")}
+        end
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("cancel_detail_recording", _params, socket) do
+    case socket.assigns.detail_recording do
+      %Recording{} = recording ->
+        case Dvr.cancel_or_stop(recording) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> assign_recordings(Cache.recordings())
+             |> assign(detail_recording: nil, record_panel?: false)
+             |> put_flash(:info, "Aufnahme entfernt")}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Entfernen fehlgeschlagen: #{inspect(reason)}")}
+        end
+
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   @impl true
@@ -140,7 +228,55 @@ defmodule TvplayerWeb.GuideLive do
     {:noreply, assign(socket, channels: channels)}
   end
 
+  def handle_info({:dvr_updated, recordings}, socket) do
+    socket = assign_recordings(socket, recordings)
+
+    socket =
+      case socket.assigns.detail do
+        %Programme{event_id: event_id} = detail ->
+          assign(socket,
+            detail_recording:
+              Cache.recording_for_event(event_id) || recording_from_programme(detail)
+          )
+
+        _ ->
+          socket
+      end
+
+    {:noreply, socket}
+  end
+
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  defp assign_recordings(socket, recordings) do
+    assign(socket,
+      recordings: recordings,
+      recording_event_ids: recording_event_ids(recordings),
+      recording_active?: Enum.any?(recordings, &(&1.state == :recording))
+    )
+  end
+
+  defp recording_event_ids(recordings) do
+    recordings
+    |> Enum.filter(&(&1.event_id && Recording.active?(&1)))
+    |> MapSet.new(& &1.event_id)
+  end
+
+  defp recording_from_programme(%Programme{dvr_uuid: uuid, dvr_state: state})
+       when is_binary(uuid) and state in ["scheduled", "recording"] do
+    Cache.recording(uuid) ||
+      %Recording{
+        uuid: uuid,
+        title: "",
+        starts_at: DateTime.utc_now(),
+        ends_at: DateTime.utc_now(),
+        start_extra: 0,
+        stop_extra: 0,
+        state: if(state == "recording", do: :recording, else: :scheduled)
+      }
+  end
+
+  defp recording_from_programme(_), do: nil
 
   defp load_grid(socket, day) do
     {from, to} = day_bounds(day)
@@ -226,6 +362,10 @@ defmodule TvplayerWeb.GuideLive do
     Programme.now?(programme)
   end
 
+  defp programme_recording?(programme, recording_event_ids) do
+    Programme.recording?(programme) or MapSet.member?(recording_event_ids, programme.event_id)
+  end
+
   defp hour_marks do
     Enum.map(0..23, fn hour ->
       %{
@@ -266,4 +406,6 @@ defmodule TvplayerWeb.GuideLive do
       String.slice(text, 0, max) <> "…"
     end
   end
+
+  defp chip_active?(current, value), do: current == value
 end

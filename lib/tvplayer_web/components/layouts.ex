@@ -38,8 +38,15 @@ defmodule TvplayerWeb.Layouts do
     <header class="tv-topbar">
       <a href={~p"/"} class="tv-topbar-brand">TV Player</a>
       <nav class="tv-topbar-nav" aria-label="Hauptnavigation">
-        <.link navigate={~p"/"} class="tv-nav-link">Live</.link>
-        <.link navigate={~p"/guide"} class="tv-nav-link">TV-Programm</.link>
+        <.link navigate={~p"/"} class="tv-nav-link">
+          <.icon name="hero-tv" class="size-5" /> Live
+        </.link>
+        <.link navigate={~p"/guide"} class="tv-nav-link">
+          <.icon name="hero-calendar-days" class="size-5" /> TV-Programm
+        </.link>
+        <.link navigate={~p"/recordings"} class="tv-nav-link">
+          <.icon name="hero-film" class="size-5" /> Aufnahmen
+        </.link>
       </nav>
     </header>
 

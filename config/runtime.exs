@@ -76,6 +76,16 @@ if config_env() != :test do
       max_concurrent: String.to_integer(System.get_env("STREAM_MAX_CONCURRENT", "6")),
       hot_channels: parse_hot_channels.(System.get_env("HOT_CHANNELS", "1")),
       runner: Tvplayer.Streams.FFmpeg
+    ],
+    transcodes: [
+      root: System.get_env("TRANSCODE_ROOT", "tmp/transcodes"),
+      ffmpeg_path: System.get_env("FFMPEG_PATH", "ffmpeg"),
+      ffprobe_path: System.get_env("FFPROBE_PATH", "ffprobe"),
+      threads: String.to_integer(System.get_env("TRANSCODE_THREADS", "4")),
+      preset: System.get_env("TRANSCODE_PRESET", "veryfast"),
+      crf: String.to_integer(System.get_env("TRANSCODE_CRF", "23")),
+      audio_bitrate: System.get_env("TRANSCODE_AUDIO_BITRATE", "160k"),
+      runner: Tvplayer.Recordings.FFmpegRunner
     ]
 end
 

@@ -5,8 +5,19 @@
       <h1 class="tv-title">TV-Programm</h1>
     </div>
     <nav class="tv-nav" aria-label="Hauptnavigation">
-      <.link navigate={~p"/"} class="tv-nav-link">Live</.link>
-      <.link navigate={~p"/guide"} class="tv-nav-link tv-nav-link-active">TV-Programm</.link>
+      <.link navigate={~p"/"} class="tv-nav-link">
+        <.icon name="hero-tv" class="size-5" /> Live
+      </.link>
+      <.link navigate={~p"/guide"} class="tv-nav-link tv-nav-link-active">
+        <.icon name="hero-calendar-days" class="size-5" /> TV-Programm
+      </.link>
+      <.link
+        navigate={~p"/recordings"}
+        class={["tv-nav-link", @recording_active? && "tv-nav-link-recording"]}
+      >
+        <.icon name="hero-film" class="size-5" /> Aufnahmen
+        <span :if={@recording_active?} class="tv-nav-rec-dot" aria-label="Aufnahme läuft"></span>
+      </.link>
     </nav>
   </header>
 
@@ -47,12 +58,22 @@
     <button
       :for={programme <- @search_results}
       type="button"
-      class="tv-programme-row"
+      class={[
+        "tv-programme-row",
+        programme_recording?(programme, @recording_event_ids) && "tv-programme-row-recording"
+      ]}
       phx-click="show_detail"
       phx-value-id={programme.event_id}
     >
       <span class="tv-programme-time-range">
         {format_time(programme.starts_at)} · {programme.channel_name}
+        <span
+          :if={programme_recording?(programme, @recording_event_ids)}
+          class="tv-epg-rec-badge"
+          title="Aufnahme geplant"
+        >
+          REC
+        </span>
       </span>
       <span class="tv-programme-row-title">{programme_title(programme)}</span>
       <span class="tv-programme-row-desc">{truncate(
@@ -129,7 +150,9 @@
                 id={"epg-prog-#{programme.event_id}"}
                 class={[
                   "tv-epg-programme",
-                  programme_now?(programme) && "tv-epg-programme-now"
+                  programme_now?(programme) && "tv-epg-programme-now",
+                  programme_recording?(programme, @recording_event_ids) &&
+                    "tv-epg-programme-recording"
                 ]}
                 style={programme_style(programme, @day)}
                 phx-click="show_detail"
@@ -138,6 +161,11 @@
               >
                 <span class="tv-epg-programme-time">
                   {format_time(programme.starts_at)}
+                  <span
+                    :if={programme_recording?(programme, @recording_event_ids)}
+                    class="tv-epg-rec-dot"
+                    aria-label="Aufnahme geplant"
+                  ></span>
                 </span>
                 <span class="tv-epg-programme-title">{programme_title(programme)}</span>
               </button>
@@ -178,19 +206,92 @@
       <p class="tv-modal-body">
         {@detail.description || @detail.summary || "Keine Beschreibung verfügbar."}
       </p>
+
+      <div :if={@detail_recording} class="tv-record-status" id="detail-recording-status">
+        <span class={["tv-state-badge", "tv-state-#{@detail_recording.state}"]}>
+          {if @detail_recording.state == :recording,
+            do: "Wird aufgenommen",
+            else: "Aufnahme geplant"}
+        </span>
+      </div>
+
+      <div :if={@record_panel?} id="record-padding-panel" class="tv-padding-panel">
+        <p class="tv-label">Vorlauf</p>
+        <div class="tv-chip-row" role="group" aria-label="Vorlauf">
+          <button
+            :for={minutes <- @padding_options}
+            type="button"
+            id={"start-extra-#{minutes}"}
+            class={["tv-chip", chip_active?(@start_extra, minutes) && "tv-chip-active"]}
+            phx-click="set_start_extra"
+            phx-value-minutes={minutes}
+          >
+            {minutes} Min
+          </button>
+        </div>
+        <p class="tv-label">Nachlauf</p>
+        <div class="tv-chip-row" role="group" aria-label="Nachlauf">
+          <button
+            :for={minutes <- @padding_options}
+            type="button"
+            id={"stop-extra-#{minutes}"}
+            class={["tv-chip", chip_active?(@stop_extra, minutes) && "tv-chip-active"]}
+            phx-click="set_stop_extra"
+            phx-value-minutes={minutes}
+          >
+            {minutes} Min
+          </button>
+        </div>
+      </div>
+
       <div class="tv-modal-actions">
-        <button
-          type="button"
-          class="tv-button"
-          phx-click="watch_channel"
-          phx-value-uuid={@detail.channel_uuid}
-        >
-          Kanal ansehen
-        </button>
+        <div class="tv-modal-actions-primary">
+          <button
+            type="button"
+            class="tv-button"
+            phx-click="watch_channel"
+            phx-value-uuid={@detail.channel_uuid}
+          >
+            Kanal ansehen
+          </button>
+
+          <button
+            :if={!@detail_recording && !@record_panel?}
+            id="detail-record-btn"
+            type="button"
+            class="tv-button tv-button-record"
+            phx-click="open_record_panel"
+          >
+            <span class="tv-rec-dot"></span> Aufnehmen
+          </button>
+
+          <button
+            :if={!@detail_recording && @record_panel?}
+            id="detail-confirm-record-btn"
+            type="button"
+            class="tv-button tv-button-record"
+            phx-click="confirm_record"
+          >
+            <span class="tv-rec-dot"></span> Aufnahme bestätigen
+          </button>
+
+          <button
+            :if={@detail_recording}
+            id="detail-cancel-record-btn"
+            type="button"
+            class="tv-button tv-button-record tv-button-record-active"
+            phx-click="cancel_detail_recording"
+          >
+            Aufnahme entfernen
+          </button>
+        </div>
+
         <button type="button" class="tv-button tv-button-secondary" phx-click="close_detail">
           Schließen
         </button>
       </div>
     </div>
   </div>
+
+  <Layouts.flash_group flash={@flash} />
 </div>

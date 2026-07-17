@@ -16,7 +16,9 @@ defmodule Tvplayer.Tvheadend.Programme do
     :starts_at,
     :ends_at,
     :next_event_id,
-    :image
+    :image,
+    :dvr_uuid,
+    :dvr_state
   ]
 
   @type t :: %__MODULE__{
@@ -31,7 +33,9 @@ defmodule Tvplayer.Tvheadend.Programme do
           starts_at: DateTime.t(),
           ends_at: DateTime.t(),
           next_event_id: integer() | nil,
-          image: String.t() | nil
+          image: String.t() | nil,
+          dvr_uuid: String.t() | nil,
+          dvr_state: String.t() | nil
         }
 
   def from_api(entry) when is_map(entry) do
@@ -47,9 +51,20 @@ defmodule Tvplayer.Tvheadend.Programme do
       starts_at: unix_to_datetime(Map.fetch!(entry, "start")),
       ends_at: unix_to_datetime(Map.fetch!(entry, "stop")),
       next_event_id: Map.get(entry, "nextEventId"),
-      image: Map.get(entry, "image") || Map.get(entry, "channelIcon")
+      image: Map.get(entry, "image") || Map.get(entry, "channelIcon"),
+      dvr_uuid: Map.get(entry, "dvrUuid"),
+      dvr_state: Map.get(entry, "dvrState")
     }
   end
+
+  @doc """
+  True when this programme already has a scheduled or active recording.
+  """
+  def recording?(%__MODULE__{dvr_state: state}) when is_binary(state) do
+    state in ["scheduled", "recording"]
+  end
+
+  def recording?(_), do: false
 
   def now?(programme, now \\ DateTime.utc_now()) do
     DateTime.compare(programme.starts_at, now) != :gt and

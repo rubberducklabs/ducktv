@@ -42,6 +42,16 @@ config :tvplayer,
     max_concurrent: 6,
     hot_channels: [1],
     runner: Tvplayer.Streams.FFmpeg
+  ],
+  transcodes: [
+    root: "tmp/transcodes",
+    ffmpeg_path: "ffmpeg",
+    ffprobe_path: "ffprobe",
+    threads: 4,
+    preset: "veryfast",
+    crf: 23,
+    audio_bitrate: "160k",
+    runner: Tvplayer.Recordings.FFmpegRunner
   ]
 
 # Configure the endpoint

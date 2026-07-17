@@ -11,7 +11,12 @@ defmodule Tvplayer.Application do
       Application.get_env(:tvplayer, :streams, [])
       |> Keyword.get(:hls_root, "tmp/hls")
 
+    transcode_root =
+      Application.get_env(:tvplayer, :transcodes, [])
+      |> Keyword.get(:root, "tmp/transcodes")
+
     File.mkdir_p!(hls_root)
+    File.mkdir_p!(transcode_root)
     # Reap ffmpeg left behind by previous BEAM crashes / abrupt restarts.
     Tvplayer.Streams.Probe.ensure_table!()
     Tvplayer.Streams.FFmpeg.prepare!(hls_root)
@@ -24,6 +29,7 @@ defmodule Tvplayer.Application do
       {Registry, keys: :unique, name: Tvplayer.Streams.Registry},
       {DynamicSupervisor, name: Tvplayer.Streams.Supervisor, strategy: :one_for_one},
       Tvplayer.Streams.Manager,
+      Tvplayer.Recordings.Transcoder,
       TvplayerWeb.Endpoint
     ]
 
