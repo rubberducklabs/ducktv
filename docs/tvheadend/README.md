@@ -103,6 +103,7 @@ Tvplayer uses numeric filters on EPG `start`/`stop` for time-window queries in `
 | `Client.server_info/1` | `GET /api/serverinfo` |
 | `Client.list_channels/1` | `GET /api/channel/grid` |
 | `Client.list_now/1` | `GET /api/epg/events/grid?mode=now` |
+| `Client.load_events/2` | `GET /api/epg/events/load` |
 | `Client.list_events/1` | `GET /api/epg/events/grid` |
 | `Client.search_events/2` | `GET /api/epg/events/grid` (title filter) |
 | `Client.stream_url/2` | `GET /stream/channel/<uuid>?profile=pass` |

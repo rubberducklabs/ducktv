@@ -71,6 +71,30 @@ defmodule Tvplayer.Tvheadend.Programme do
       DateTime.compare(programme.ends_at, now) == :gt
   end
 
+  @doc """
+  Picks the programme airing at `now` and the one that follows it.
+  """
+  def now_and_next(programmes, now \\ DateTime.utc_now())
+
+  def now_and_next([], _now), do: %{now: nil, next: nil}
+
+  def now_and_next(programmes, now) do
+    sorted =
+      programmes
+      |> Enum.uniq_by(& &1.event_id)
+      |> Enum.sort_by(&DateTime.to_unix(&1.starts_at))
+
+    now_prog = Enum.find(sorted, &now?(&1, now)) || List.first(sorted)
+
+    next_prog =
+      sorted
+      |> Enum.drop_while(&(&1.event_id != now_prog.event_id))
+      |> Enum.drop(1)
+      |> List.first()
+
+    %{now: now_prog, next: next_prog}
+  end
+
   def display_text(%__MODULE__{} = programme) do
     [
       programme.title,

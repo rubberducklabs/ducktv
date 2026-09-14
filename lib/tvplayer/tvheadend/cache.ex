@@ -317,11 +317,92 @@ defmodule Tvplayer.Tvheadend.Cache do
         by_channel = Enum.group_by(programmes, & &1.channel_uuid)
         expires_at = DateTime.add(DateTime.utc_now(), 5 * 60, :second)
         events_cache = Map.put(state.events_cache, key, {expires_at, by_channel})
-        {:reply, {:ok, by_channel}, %{state | events_cache: events_cache}}
+
+        state =
+          %{state | events_cache: events_cache}
+          |> maybe_enrich_now_next(programmes)
+
+        {:reply, {:ok, by_channel}, state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  defp load_next_programmes(now_programmes) do
+    next_ids =
+      now_programmes
+      |> Enum.map(& &1.next_event_id)
+      |> Enum.filter(&(is_integer(&1) and &1 > 0))
+      |> Enum.uniq()
+
+    case Client.load_events(next_ids) do
+      {:ok, programmes} -> programmes
+      {:error, _} -> []
+    end
+  end
+
+  defp cached_following_programmes(events_cache, now_programmes) do
+    now_by_uuid = Map.new(now_programmes, &{&1.channel_uuid, &1})
+
+    events_cache
+    |> cached_grid_programmes()
+    |> Enum.filter(fn programme ->
+      case Map.get(now_by_uuid, programme.channel_uuid) do
+        nil -> false
+        now -> following_soon?(programme, now)
+      end
+    end)
+  end
+
+  defp cached_grid_programmes(events_cache) do
+    Enum.flat_map(events_cache, fn
+      {{:grid, _, _}, {_expires_at, by_channel}} when is_map(by_channel) ->
+        List.flatten(Map.values(by_channel))
+
+      _ ->
+        []
+    end)
+  end
+
+  defp following_soon?(programme, now) do
+    horizon = DateTime.add(now.ends_at, 6 * 3600, :second)
+
+    programme.event_id != now.event_id and
+      DateTime.compare(programme.starts_at, now.starts_at) == :gt and
+      DateTime.compare(programme.starts_at, horizon) != :gt
+  end
+
+  defp maybe_enrich_now_next(state, []), do: state
+
+  defp maybe_enrich_now_next(state, programmes) do
+    by_channel = Enum.group_by(programmes, & &1.channel_uuid)
+
+    now_by_channel =
+      Map.new(state.now_by_channel, fn {uuid, entry} ->
+        {uuid, fill_missing_next(entry, Map.get(by_channel, uuid, []))}
+      end)
+
+    if now_by_channel == state.now_by_channel do
+      state
+    else
+      Phoenix.PubSub.broadcast(Tvplayer.PubSub, @epg_topic, {:epg_updated, now_by_channel})
+      %{state | now_by_channel: now_by_channel}
+    end
+  end
+
+  defp fill_missing_next(%{now: now, next: nil} = entry, programmes) do
+    %{entry | next: earliest_following(programmes, now)}
+  end
+
+  defp fill_missing_next(entry, _programmes), do: entry
+
+  defp earliest_following(_programmes, nil), do: nil
+
+  defp earliest_following(programmes, now) do
+    programmes
+    |> Enum.filter(&following_soon?(&1, now))
+    |> Enum.min_by(&DateTime.to_unix(&1.starts_at), fn -> nil end)
   end
 
   defp refresh_all(state) do
@@ -334,13 +415,16 @@ defmodule Tvplayer.Tvheadend.Cache do
         |> Enum.filter(& &1.number)
         |> Map.new(&{&1.number, &1})
 
+      next_programmes =
+        load_next_programmes(now_programmes) ++
+          cached_following_programmes(state.events_cache, now_programmes)
+
       now_by_channel =
-        now_programmes
+        (now_programmes ++ next_programmes)
+        |> Enum.uniq_by(& &1.event_id)
         |> Enum.group_by(& &1.channel_uuid)
         |> Map.new(fn {uuid, programmes} ->
-          now = Enum.find(programmes, &Programme.now?/1) || List.first(programmes)
-          next = Enum.find(programmes, fn p -> p != now end)
-          {uuid, %{now: now, next: next}}
+          {uuid, Programme.now_and_next(programmes)}
         end)
 
       new_state = %{

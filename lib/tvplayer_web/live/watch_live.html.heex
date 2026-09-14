@@ -99,32 +99,6 @@
               </span>
 
               <button
-                :if={@selected && !recording?(@current_recording)}
-                id="player-record-btn"
-                type="button"
-                class="tv-player-ctrl tv-player-record"
-                phx-click="record_now"
-                aria-label="Aktuelle Sendung aufnehmen"
-                title="Aufnehmen"
-              >
-                <span class="tv-rec-dot"></span>
-                <span class="tv-rec-label">REC</span>
-              </button>
-
-              <button
-                :if={@selected && recording?(@current_recording)}
-                id="player-stop-record-btn"
-                type="button"
-                class="tv-player-ctrl tv-player-record tv-player-record-active"
-                phx-click="stop_recording"
-                aria-label="Aufnahme stoppen"
-                title="Aufnahme stoppen"
-              >
-                <span class="tv-rec-dot tv-rec-dot-active"></span>
-                <span class="tv-rec-label">STOP</span>
-              </button>
-
-              <button
                 type="button"
                 class="tv-player-ctrl tv-player-fullscreen"
                 data-fullscreen
@@ -196,7 +170,7 @@
       </div>
       <div class="tv-now-actions">
         <button
-          :if={!recording?(@current_recording)}
+          :if={is_nil(@current_recording)}
           id="now-record-btn"
           type="button"
           class="tv-button tv-button-record"
@@ -211,13 +185,16 @@
           class="tv-button tv-button-record tv-button-record-active"
           phx-click="stop_recording"
         >
-          <span class="tv-rec-dot tv-rec-dot-active"></span>
-          <%= if @current_recording.state == :recording do %>
-            Aufnahme läuft · Stoppen
-          <% else %>
-            Geplant · Abbrechen
-          <% end %>
+          <span class="tv-rec-dot tv-rec-dot-active"></span> Aufnahme läuft · Stoppen
         </button>
+        <.link
+          :if={scheduled?(@current_recording)}
+          id="now-planned-link"
+          navigate={~p"/recordings"}
+          class="tv-planned-link"
+        >
+          Aufnahme geplant
+        </.link>
       </div>
     </div>
   </section>

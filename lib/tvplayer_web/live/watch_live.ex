@@ -53,7 +53,10 @@ defmodule TvplayerWeb.WatchLive do
 
   @impl true
   def handle_event("select_channel", %{"uuid" => uuid}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/?channel=#{uuid}")}
+    {:noreply,
+     socket
+     |> push_event("scroll_to_player", %{})
+     |> push_patch(to: ~p"/?channel=#{uuid}")}
   end
 
   def handle_event("retry", _params, socket) do
@@ -295,16 +298,25 @@ defmodule TvplayerWeb.WatchLive do
   end
 
   defp sync_current_recording(socket) do
-    recording =
-      case current_programme(socket) do
-        %Programme{event_id: event_id} ->
-          Cache.recording_for_event(event_id) || channel_recording(socket)
+    event_recording = programme_recording(socket)
+    channel_recording = channel_recording(socket)
 
-        nil ->
-          channel_recording(socket)
+    recording =
+      cond do
+        match?(%Recording{state: :recording}, event_recording) -> event_recording
+        match?(%Recording{state: :recording}, channel_recording) -> channel_recording
+        match?(%Recording{state: :scheduled}, event_recording) -> event_recording
+        true -> nil
       end
 
     assign(socket, current_recording: recording)
+  end
+
+  defp programme_recording(socket) do
+    case current_programme(socket) do
+      %Programme{event_id: event_id} -> Cache.recording_for_event(event_id)
+      _ -> nil
+    end
   end
 
   defp channel_recording(socket) do
@@ -411,5 +423,10 @@ defmodule TvplayerWeb.WatchLive do
   defp encoder_dot_label(_), do: "Encoder inaktiv"
 
   defp recording?(nil), do: false
-  defp recording?(%Recording{state: state}), do: state in [:scheduled, :recording]
+  defp recording?(%Recording{state: :recording}), do: true
+  defp recording?(_), do: false
+
+  defp scheduled?(nil), do: false
+  defp scheduled?(%Recording{state: :scheduled}), do: true
+  defp scheduled?(_), do: false
 end

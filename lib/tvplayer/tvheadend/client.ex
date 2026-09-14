@@ -51,6 +51,47 @@ defmodule Tvplayer.Tvheadend.Client do
   end
 
   @doc """
+  Loads specific EPG events by id.
+
+  TVHeadend accepts a single `eventId` or a JSON array of ids.
+  """
+  def load_events(event_ids, opts \\ [])
+
+  def load_events([], _opts), do: {:ok, []}
+
+  def load_events(event_ids, opts) when is_list(event_ids) do
+    ids =
+      event_ids
+      |> Enum.filter(&(is_integer(&1) and &1 > 0))
+      |> Enum.uniq()
+
+    case ids do
+      [] ->
+        {:ok, []}
+
+      [id] ->
+        load_events_request(id, opts)
+
+      ids ->
+        load_events_request(Jason.encode!(ids), opts)
+    end
+  end
+
+  def load_events(event_id, opts) when is_integer(event_id) do
+    load_events([event_id], opts)
+  end
+
+  defp load_events_request(event_id, opts) do
+    with {:ok, body} <- get("/api/epg/events/load", %{"eventId" => event_id}, opts) do
+      {:ok, Enum.map(epg_entries(body), &Programme.from_api/1)}
+    end
+  end
+
+  defp epg_entries(%{"entries" => entries}) when is_list(entries), do: entries
+  defp epg_entries(entries) when is_list(entries), do: entries
+  defp epg_entries(_), do: []
+
+  @doc """
   Lists EPG events in a time window.
 
   Options:
@@ -262,26 +303,118 @@ defmodule Tvplayer.Tvheadend.Client do
     end
   end
 
-  # Live path: stream into the request process via `into: :self`, then chunk here.
-  # Never call Plug.Conn from Finch/Req callbacks — Bandit requires the stream owner.
+  # Live path: stream TVHeadend → browser with TCP backpressure.
+  #
+  # `into: :self` is a firehose: Finch dumps the whole DVR file into this
+  # process mailbox as fast as the LAN allows. Original recordings are
+  # multi-GB; a handful of parallel downloads OOM the BEAM (anon-rss ~23GB).
+  #
+  # `into: fun` uses Finch.stream_while + Mint passive mode in *this* process
+  # (Bandit requires Plug.Conn.chunk/2 to run in the stream owner). The next
+  # TVH chunk is only read after the previous one is written to the browser.
+  # HTTP/1 is required — Finch HTTP/2 streaming has no backpressure.
   defp stream_dvrfile_live(url, auth, conn, content_type, disposition, receive_timeout) do
-    case Req.get(url,
-           auth: auth,
-           into: :self,
-           decode_body: false,
-           receive_timeout: receive_timeout,
-           connect_options: [timeout: connect_timeout(receive_timeout)],
-           retry: false
-         ) do
-      {:ok, %{status: status, headers: headers, body: body}} when status in 200..299 ->
-        type = header_value(headers, "content-type") || content_type
+    key = {__MODULE__, :dvr_stream, make_ref()}
 
-        conn =
-          conn
-          |> put_download_headers(disposition, type)
-          |> Plug.Conn.send_chunked(200)
+    Process.put(key, %{
+      conn: conn,
+      content_type: content_type,
+      disposition: disposition,
+      started?: false,
+      error: nil
+    })
 
-        chunk_body(body, conn)
+    try do
+      result =
+        Req.get(url,
+          auth: auth,
+          into: fn {:data, chunk}, acc -> stream_dvr_chunk(chunk, acc, key) end,
+          decode_body: false,
+          receive_timeout: receive_timeout,
+          connect_options: [
+            timeout: connect_timeout(receive_timeout),
+            protocols: [:http1]
+          ],
+          retry: false
+        )
+
+      finish_dvr_stream(result, key)
+    after
+      Process.delete(key)
+    end
+  end
+
+  defp stream_dvr_chunk(chunk, {_req, resp} = acc, key) do
+    state = Process.get(key)
+
+    cond do
+      not is_map(state) ->
+        {:halt, acc}
+
+      match?(%{error: error} when not is_nil(error), state) ->
+        {:halt, acc}
+
+      resp.status not in 200..299 ->
+        {:cont, acc}
+
+      true ->
+        case write_dvr_chunk(state, resp, chunk) do
+          {:ok, state} ->
+            Process.put(key, state)
+            {:cont, acc}
+
+          {:error, reason} ->
+            Process.put(key, %{state | error: reason})
+            {:halt, acc}
+        end
+    end
+  end
+
+  defp write_dvr_chunk(state, resp, chunk) do
+    with {:ok, state} <- ensure_chunked_started(state, resp) do
+      case Plug.Conn.chunk(state.conn, normalize_body(chunk)) do
+        {:ok, conn} -> {:ok, %{state | conn: conn}}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp ensure_chunked_started(%{started?: true} = state, _resp), do: {:ok, state}
+
+  defp ensure_chunked_started(state, resp) do
+    type = header_value(resp.headers, "content-type") || state.content_type
+
+    conn =
+      state.conn
+      |> put_download_headers(state.disposition, type)
+      |> Plug.Conn.send_chunked(200)
+
+    {:ok, %{state | conn: conn, started?: true}}
+  end
+
+  defp finish_dvr_stream(result, key) do
+    state = Process.get(key)
+
+    case result do
+      {:ok, %{status: status}} when status in 200..299 ->
+        cond do
+          is_map(state) and state.error ->
+            {:error, state.error}
+
+          is_map(state) and state.started? ->
+            {:ok, state.conn}
+
+          is_map(state) ->
+            conn =
+              state.conn
+              |> put_download_headers(state.disposition, state.content_type)
+              |> Plug.Conn.send_chunked(200)
+
+            {:ok, conn}
+
+          true ->
+            {:error, :stream_state_lost}
+        end
 
       {:ok, %{status: status}} ->
         {:error, {:http_error, status}}

@@ -129,7 +129,7 @@ When a recording is scheduled for an event, extra fields appear:
 
 **Tvplayer fields used:** `eventId`, `channelUuid`, `channelName`, `channelNumber`, `start`, `stop`, `title`, `subtitle`, `summary`, `description`, `nextEventId`, `image`/`channelIcon`.
 
-### Load single event(s)
+### Load single event(s) — **used by tvplayer**
 
 ```
 GET /api/epg/events/load?eventId=<id>
