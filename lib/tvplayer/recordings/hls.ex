@@ -3,8 +3,13 @@ defmodule Tvplayer.Recordings.Hls do
   VOD HLS for a transcoded recording.
 
   The MP4 in the transcode directory stays the download. Playback is a
-  copy-only cut of that file into ~4 second fMP4 segments, so the player
+  copy-only cut of that file into ~4 second MPEG-TS segments, so the player
   starts from the first segment instead of reading the whole MP4 index.
+
+  TS rather than fragmented MP4: the MP4 keeps audio and video aligned with
+  an edit list (x264 delay and AAC priming). Players ignore that list on
+  fMP4 HLS, so the picture lags the sound. MPEG-TS has no edit list, and
+  hls.js rebuilds the timestamps itself.
 
   Recordings encoded before this existed are segmented on first play.
   That pass copies packets; it does not encode again.
@@ -14,7 +19,7 @@ defmodule Tvplayer.Recordings.Hls do
 
   @segment_seconds "4"
 
-  @doc "Directory holding `index.m3u8`, `init.mp4` and the segments."
+  @doc "Directory holding `index.m3u8` and the `seg_#####.ts` segments."
   def dir(uuid) when is_binary(uuid) do
     Path.join(root(), uuid)
   end
@@ -42,10 +47,20 @@ defmodule Tvplayer.Recordings.Hls do
   end
 
   def ready?(uuid) when is_binary(uuid) do
-    File.regular?(Path.join(dir(uuid), "index.m3u8"))
+    path = Path.join(dir(uuid), "index.m3u8")
+
+    case File.read(path) do
+      {:ok, body} ->
+        String.contains?(body, "#EXT-X-ENDLIST") and
+          String.contains?(body, ".ts") and
+          not String.contains?(body, "#EXT-X-MAP")
+
+      _ ->
+        false
+    end
   end
 
-  @doc "Safe path of one playlist, init segment or media segment."
+  @doc "Safe path of the playlist or one media segment."
   def path(uuid, file) when is_binary(uuid) and is_binary(file) do
     if valid_file?(file) do
       path = Path.join(dir(uuid), file)
@@ -56,10 +71,9 @@ defmodule Tvplayer.Recordings.Hls do
   end
 
   def valid_file?("index.m3u8"), do: true
-  def valid_file?("init.mp4"), do: true
 
   def valid_file?(<<"seg_", rest::binary>>) do
-    String.match?(rest, ~r/^\d{5}\.m4s$/)
+    String.match?(rest, ~r/^\d{5}\.ts$/)
   end
 
   def valid_file?(_file), do: false
@@ -80,18 +94,19 @@ defmodule Tvplayer.Recordings.Hls do
       mp4_path(uuid),
       "-c",
       "copy",
+      # No added mux delay. The MP4 timestamps are already aligned.
+      "-muxdelay",
+      "0",
+      "-muxpreload",
+      "0",
       "-f",
       "hls",
       "-hls_time",
       @segment_seconds,
       "-hls_playlist_type",
       "vod",
-      "-hls_segment_type",
-      "fmp4",
-      "-hls_fmp4_init_filename",
-      "init.mp4",
       "-hls_segment_filename",
-      Path.join(tmp, "seg_%05d.m4s"),
+      Path.join(tmp, "seg_%05d.ts"),
       "-hls_flags",
       "independent_segments",
       Path.join(tmp, "index.m3u8")

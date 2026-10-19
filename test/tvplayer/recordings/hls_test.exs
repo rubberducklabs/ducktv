@@ -51,11 +51,19 @@ defmodule Tvplayer.Recordings.HlsTest do
     playlist = File.read!(Path.join(Hls.dir(uuid), "index.m3u8"))
     assert playlist =~ "#EXT-X-PLAYLIST-TYPE:VOD"
     assert playlist =~ "#EXT-X-ENDLIST"
-    assert playlist =~ "init.mp4"
-    assert playlist =~ "seg_"
-    assert {:ok, _init} = Hls.path(uuid, "init.mp4")
+    assert playlist =~ "seg_00000.ts"
+    refute playlist =~ "#EXT-X-MAP"
+    assert {:ok, _segment} = Hls.path(uuid, "seg_00000.ts")
+    refute Hls.valid_file?("init.mp4")
 
+    # A playlist left over from the fMP4 cut is rebuilt. Players ignore the
+    # MP4 edit list on those segments, which puts the picture behind the sound.
+    File.write!(Path.join(Hls.dir(uuid), "index.m3u8"), "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n")
     assert Hls.ensure(uuid) == :ok
+    rebuilt = File.read!(Path.join(Hls.dir(uuid), "index.m3u8"))
+    assert rebuilt =~ "seg_00000.ts"
+    refute rebuilt =~ "#EXT-X-MAP"
+
     assert Hls.path(uuid, "../#{uuid}.mp4") == :error
   end
 end

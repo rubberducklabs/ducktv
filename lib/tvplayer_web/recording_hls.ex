@@ -26,8 +26,7 @@ defmodule TvplayerWeb.RecordingHls do
   end
 
   defp content_type("index.m3u8"), do: "application/vnd.apple.mpegurl"
-  defp content_type("init.mp4"), do: "video/mp4"
-  defp content_type(_file), do: "video/iso.segment"
+  defp content_type(_file), do: "video/mp2t"
 
   defp cache_control("index.m3u8"), do: "private, max-age=60"
   defp cache_control(_file), do: "private, max-age=86400"

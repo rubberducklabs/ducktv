@@ -120,17 +120,17 @@ defmodule TvplayerWeb.RecordingControllerTest do
 
     dir = Tvplayer.Recordings.Hls.dir("rec-done")
     File.mkdir_p!(dir)
-    File.write!(Path.join(dir, "index.m3u8"), "#EXTM3U\nseg_00000.m4s\n")
-    File.write!(Path.join(dir, "seg_00000.m4s"), "segment-bytes")
+    File.write!(Path.join(dir, "index.m3u8"), "#EXTM3U\n#EXT-X-ENDLIST\nseg_00000.ts\n")
+    File.write!(Path.join(dir, "seg_00000.ts"), "segment-bytes")
 
     playlist = get(conn, ~p"/recordings/rec-done/hls/index.m3u8")
     assert playlist.status == 200
     assert get_resp_header(playlist, "content-type") == ["application/vnd.apple.mpegurl"]
-    assert playlist.resp_body =~ "seg_00000.m4s"
+    assert playlist.resp_body =~ "seg_00000.ts"
 
-    segment = get(conn, ~p"/recordings/rec-done/hls/seg_00000.m4s")
+    segment = get(conn, ~p"/recordings/rec-done/hls/seg_00000.ts")
     assert segment.status == 200
-    assert get_resp_header(segment, "content-type") == ["video/iso.segment"]
+    assert get_resp_header(segment, "content-type") == ["video/mp2t"]
     assert segment.resp_body == "segment-bytes"
   end
 

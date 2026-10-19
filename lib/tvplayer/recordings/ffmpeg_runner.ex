@@ -142,7 +142,7 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
       "-x264-params",
       "threads=#{threads}:lookahead_threads=1",
       # A keyframe every 2s, same as live TV. The web player cuts this file
-      # into ~4s HLS segments and can only start a segment on a keyframe.
+      # into ~4s MPEG-TS segments and can only start a segment on a keyframe.
       "-sc_threshold",
       "0",
       "-force_key_frames",

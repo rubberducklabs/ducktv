@@ -52,7 +52,7 @@ defmodule TvplayerWeb.SharedRecordingControllerTest do
 
     dir = Tvplayer.Recordings.Hls.dir("rec-done")
     File.mkdir_p!(dir)
-    File.write!(Path.join(dir, "index.m3u8"), "#EXTM3U\n")
+    File.write!(Path.join(dir, "index.m3u8"), "#EXTM3U\n#EXT-X-ENDLIST\nseg_00000.ts\n")
 
     token = ShareLink.sign("rec-done")
     conn = get(conn, ~p"/share/#{token}/hls/index.m3u8")
