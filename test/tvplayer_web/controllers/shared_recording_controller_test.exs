@@ -54,7 +54,7 @@ defmodule TvplayerWeb.SharedRecordingControllerTest do
     conn = get(conn, ~p"/share/#{token}/media")
 
     assert conn.status == 200
-    assert get_resp_header(conn, "content-type") == ["video/mp4; charset=utf-8"]
+    assert get_resp_header(conn, "content-type") == ["video/mp4"]
     assert conn.resp_body == "shared-mp4-bytes"
   end
 

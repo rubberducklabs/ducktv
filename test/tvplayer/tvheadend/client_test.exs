@@ -247,10 +247,32 @@ defmodule Tvplayer.Tvheadend.ClientTest do
 
     assert conn.status == 200
     assert conn.resp_body == body
+    assert Plug.Conn.get_resp_header(conn, "content-length") == ["#{byte_size(body)}"]
 
     assert Plug.Conn.get_resp_header(conn, "content-disposition") == [
              ~s(attachment; filename="ZIB.ts")
            ]
+  end
+
+  test "stream_dvrfile uses the recording size when upstream omits content-length" do
+    body = "mpegts-bytes"
+    {stub, port} = start_dvr_stub(200, body, "video/mp2t", content_length: false)
+    on_exit(fn -> stop_dvr_stub(stub) end)
+
+    conn = Plug.Test.conn(:get, "/recordings/rec-1/download")
+
+    assert {:ok, conn} =
+             Client.stream_dvrfile("/dvrfile/rec-1", conn,
+               url: "http://127.0.0.1:#{port}",
+               username: "u",
+               password: "p",
+               filename: "ZIB.ts",
+               content_type: "video/mp2t",
+               content_length: byte_size(body)
+             )
+
+    assert conn.resp_body == body
+    assert Plug.Conn.get_resp_header(conn, "content-length") == ["#{byte_size(body)}"]
   end
 
   test "stream_dvrfile live path returns http_error without sending a body" do
@@ -270,7 +292,7 @@ defmodule Tvplayer.Tvheadend.ClientTest do
     assert conn.state == :unset
   end
 
-  defp start_dvr_stub(status, body, content_type) do
+  defp start_dvr_stub(status, body, content_type, opts \\ []) do
     {:ok, listen} =
       :gen_tcp.listen(0, [
         :binary,
@@ -286,7 +308,7 @@ defmodule Tvplayer.Tvheadend.ClientTest do
     pid =
       spawn(fn ->
         send(parent, {:stub_ready, self()})
-        stub_loop(listen, status, body, content_type)
+        stub_loop(listen, status, body, content_type, opts)
       end)
 
     receive do
@@ -303,25 +325,32 @@ defmodule Tvplayer.Tvheadend.ClientTest do
     :gen_tcp.close(listen)
   end
 
-  defp stub_loop(listen, status, body, content_type) do
+  defp stub_loop(listen, status, body, content_type, opts) do
     case :gen_tcp.accept(listen, 5_000) do
       {:ok, socket} ->
         _ = drain_http_request(socket)
         reason = if status == 200, do: "OK", else: "Error"
 
+        length_header =
+          if Keyword.get(opts, :content_length, true) do
+            "content-length: #{byte_size(body)}\r\n"
+          else
+            ""
+          end
+
         response =
           "HTTP/1.1 #{status} #{reason}\r\n" <>
             "content-type: #{content_type}\r\n" <>
-            "content-length: #{byte_size(body)}\r\n" <>
+            length_header <>
             "connection: close\r\n" <>
             "\r\n" <> body
 
         :gen_tcp.send(socket, response)
         :gen_tcp.close(socket)
-        stub_loop(listen, status, body, content_type)
+        stub_loop(listen, status, body, content_type, opts)
 
       {:error, :timeout} ->
-        stub_loop(listen, status, body, content_type)
+        stub_loop(listen, status, body, content_type, opts)
 
       {:error, _} ->
         :ok

@@ -91,6 +91,7 @@ defmodule TvplayerWeb.RecordingControllerTest do
 
     assert conn.status == 200
     assert get_resp_header(conn, "content-disposition") == [~s(attachment; filename="ZIB.ts")]
+    assert get_resp_header(conn, "content-length") == ["12"]
     assert conn.resp_body == "mpegts-bytes"
   end
 
@@ -102,7 +103,7 @@ defmodule TvplayerWeb.RecordingControllerTest do
     conn = get(conn, ~p"/recordings/rec-done/download?variant=compressed")
 
     assert conn.status == 200
-    assert get_resp_header(conn, "content-type") == ["video/mp4; charset=utf-8"]
+    assert get_resp_header(conn, "content-type") == ["video/mp4"]
     assert get_resp_header(conn, "content-disposition") == [~s(attachment; filename="ZIB.mp4")]
     assert conn.resp_body == "compressed-mp4"
   end
@@ -126,6 +127,57 @@ defmodule TvplayerWeb.RecordingControllerTest do
     assert get_resp_header(conn, "accept-ranges") == ["bytes"]
     assert get_resp_header(conn, "content-range") == ["bytes 2-5/10"]
     assert conn.resp_body == "2345"
+  end
+
+  test "open-ended range returns one slice so playback can start", %{conn: conn} do
+    path = Transcoder.output_path("rec-done")
+    File.mkdir_p!(Path.dirname(path))
+    chunk = TvplayerWeb.RecordingMedia.range_chunk_bytes()
+    size = chunk + 100
+    File.write!(path, :binary.copy(<<0>>, size))
+
+    conn =
+      conn
+      |> put_req_header("range", "bytes=0-")
+      |> get(~p"/recordings/rec-done/media")
+
+    assert conn.status == 206
+    assert get_resp_header(conn, "content-range") == ["bytes 0-#{chunk - 1}/#{size}"]
+    assert get_resp_header(conn, "content-length") == ["#{chunk}"]
+    assert byte_size(conn.resp_body) == chunk
+    assert get_resp_header(conn, "content-type") == ["video/mp4"]
+  end
+
+  test "open-ended range continues from the requested offset", %{conn: conn} do
+    path = Transcoder.output_path("rec-done")
+    File.mkdir_p!(Path.dirname(path))
+    chunk = TvplayerWeb.RecordingMedia.range_chunk_bytes()
+    size = chunk * 3
+    File.write!(path, :binary.copy(<<0>>, size))
+
+    conn =
+      conn
+      |> put_req_header("range", "bytes=#{chunk}-")
+      |> get(~p"/recordings/rec-done/media")
+
+    assert conn.status == 206
+    assert get_resp_header(conn, "content-range") == ["bytes #{chunk}-#{chunk * 2 - 1}/#{size}"]
+    assert byte_size(conn.resp_body) == chunk
+  end
+
+  test "short suffix range keeps the end of the file", %{conn: conn} do
+    path = Transcoder.output_path("rec-done")
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, String.duplicate("a", 100) <> "TAIL")
+
+    conn =
+      conn
+      |> put_req_header("range", "bytes=-4")
+      |> get(~p"/recordings/rec-done/media")
+
+    assert conn.status == 206
+    assert get_resp_header(conn, "content-range") == ["bytes 100-103/104"]
+    assert conn.resp_body == "TAIL"
   end
 
   test "serves full media when no range header", %{conn: conn} do

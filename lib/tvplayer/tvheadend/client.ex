@@ -266,18 +266,45 @@ defmodule Tvplayer.Tvheadend.Client do
     content_type = Keyword.get(opts, :content_type, "application/octet-stream")
     filename = Keyword.get(opts, :filename, "aufnahme.ts")
     disposition = ~s(attachment; filename="#{escape_disposition(filename)}")
+    content_length = positive_length(Keyword.get(opts, :content_length))
 
     case Keyword.get(opts, :plug) || config[:plug] do
       nil ->
-        stream_dvrfile_live(url, auth, conn, content_type, disposition, receive_timeout)
+        stream_dvrfile_live(
+          url,
+          auth,
+          conn,
+          content_type,
+          disposition,
+          content_length,
+          receive_timeout
+        )
 
       plug ->
-        stream_dvrfile_buffered(url, auth, plug, conn, content_type, disposition, receive_timeout)
+        stream_dvrfile_buffered(
+          url,
+          auth,
+          plug,
+          conn,
+          content_type,
+          disposition,
+          content_length,
+          receive_timeout
+        )
     end
   end
 
   # Test/plug path: body arrives fully buffered; chunk from this process.
-  defp stream_dvrfile_buffered(url, auth, plug, conn, content_type, disposition, receive_timeout) do
+  defp stream_dvrfile_buffered(
+         url,
+         auth,
+         plug,
+         conn,
+         content_type,
+         disposition,
+         content_length,
+         receive_timeout
+       ) do
     case Req.get(url,
            auth: auth,
            plug: plug,
@@ -287,13 +314,18 @@ defmodule Tvplayer.Tvheadend.Client do
          ) do
       {:ok, %{status: status, body: body, headers: headers}} when status in 200..299 ->
         type = header_value(headers, "content-type") || content_type
+        body = normalize_body(body)
+
+        length =
+          parse_content_length(header_value(headers, "content-length")) ||
+            content_length || byte_size(body)
 
         conn =
           conn
-          |> put_download_headers(disposition, type)
+          |> put_download_headers(disposition, type, length)
           |> Plug.Conn.send_chunked(200)
 
-        chunk_body(normalize_body(body), conn)
+        chunk_body(body, conn)
 
       {:ok, %{status: status}} ->
         {:error, {:http_error, status}}
@@ -313,13 +345,22 @@ defmodule Tvplayer.Tvheadend.Client do
   # (Bandit requires Plug.Conn.chunk/2 to run in the stream owner). The next
   # TVH chunk is only read after the previous one is written to the browser.
   # HTTP/1 is required — Finch HTTP/2 streaming has no backpressure.
-  defp stream_dvrfile_live(url, auth, conn, content_type, disposition, receive_timeout) do
+  defp stream_dvrfile_live(
+         url,
+         auth,
+         conn,
+         content_type,
+         disposition,
+         content_length,
+         receive_timeout
+       ) do
     key = {__MODULE__, :dvr_stream, make_ref()}
 
     Process.put(key, %{
       conn: conn,
       content_type: content_type,
       disposition: disposition,
+      content_length: content_length,
       started?: false,
       error: nil
     })
@@ -384,9 +425,12 @@ defmodule Tvplayer.Tvheadend.Client do
   defp ensure_chunked_started(state, resp) do
     type = header_value(resp.headers, "content-type") || state.content_type
 
+    length =
+      parse_content_length(header_value(resp.headers, "content-length")) || state.content_length
+
     conn =
       state.conn
-      |> put_download_headers(state.disposition, type)
+      |> put_download_headers(state.disposition, type, length)
       |> Plug.Conn.send_chunked(200)
 
     {:ok, %{state | conn: conn, started?: true}}
@@ -407,7 +451,7 @@ defmodule Tvplayer.Tvheadend.Client do
           is_map(state) ->
             conn =
               state.conn
-              |> put_download_headers(state.disposition, state.content_type)
+              |> put_download_headers(state.disposition, state.content_type, state.content_length)
               |> Plug.Conn.send_chunked(200)
 
             {:ok, conn}
@@ -445,12 +489,33 @@ defmodule Tvplayer.Tvheadend.Client do
   defp normalize_body(body) when is_binary(body), do: body
   defp normalize_body(body), do: IO.iodata_to_binary(List.wrap(body))
 
-  defp put_download_headers(conn, disposition, content_type) do
-    conn
-    |> Plug.Conn.put_resp_header("content-disposition", disposition)
-    |> Plug.Conn.put_resp_header("cache-control", "private, max-age=0")
-    |> Plug.Conn.put_resp_content_type(content_type)
+  defp put_download_headers(conn, disposition, content_type, content_length) do
+    conn =
+      conn
+      |> Plug.Conn.put_resp_header("content-disposition", disposition)
+      |> Plug.Conn.put_resp_header("cache-control", "private, max-age=0, no-transform")
+      |> Plug.Conn.put_resp_content_type(content_type, nil)
+
+    case positive_length(content_length) do
+      length when is_integer(length) ->
+        Plug.Conn.put_resp_header(conn, "content-length", Integer.to_string(length))
+
+      nil ->
+        conn
+    end
   end
+
+  defp parse_content_length(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {length, ""} -> positive_length(length)
+      _ -> nil
+    end
+  end
+
+  defp parse_content_length(_), do: nil
+
+  defp positive_length(length) when is_integer(length) and length > 0, do: length
+  defp positive_length(_), do: nil
 
   defp header_value(headers, name) when is_map(headers) do
     target = String.downcase(name)

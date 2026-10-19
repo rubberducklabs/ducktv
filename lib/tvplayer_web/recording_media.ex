@@ -3,6 +3,16 @@ defmodule TvplayerWeb.RecordingMedia do
 
   import Plug.Conn
 
+  # Browsers open playback with `Range: bytes=0-`, which means "the rest of
+  # the file". Answering that with a multi-GB MP4 makes the player buffer the
+  # whole recording before it will play. Each response is capped so playback
+  # starts from the first slice and the browser asks for the next slice as
+  # the playhead moves.
+  @range_chunk_bytes 8 * 1024 * 1024
+
+  @doc false
+  def range_chunk_bytes, do: @range_chunk_bytes
+
   @doc """
   Streams an MP4 inline with HTTP Range support (for in-browser playback).
   """
@@ -11,8 +21,9 @@ defmodule TvplayerWeb.RecordingMedia do
 
     conn =
       conn
-      |> put_resp_content_type("video/mp4")
+      |> put_resp_content_type("video/mp4", nil)
       |> put_resp_header("accept-ranges", "bytes")
+      |> put_resp_header("cache-control", "private, no-transform")
       |> put_resp_header(
         "content-disposition",
         ~s(inline; filename="#{escape_disposition(filename)}")
@@ -20,6 +31,7 @@ defmodule TvplayerWeb.RecordingMedia do
 
     case parse_range(get_req_header(conn, "range"), size) do
       {:ok, start_pos, end_pos} ->
+        {start_pos, end_pos} = clamp_range(start_pos, end_pos, size)
         length = end_pos - start_pos + 1
 
         conn
@@ -44,12 +56,21 @@ defmodule TvplayerWeb.RecordingMedia do
   """
   def serve_attachment(conn, path, filename) when is_binary(path) and is_binary(filename) do
     conn
-    |> put_resp_content_type("video/mp4")
+    |> put_resp_content_type("video/mp4", nil)
     |> put_resp_header(
       "content-disposition",
       ~s(attachment; filename="#{escape_disposition(filename)}")
     )
     |> send_file(200, path)
+  end
+
+  # Cap every read at one slice that starts where the client asked. Players
+  # continue and seek with open-ended ranges (`bytes=N-`); those already end
+  # at EOF, so snapping them to the file tail would return the wrong bytes.
+  # A short suffix (`bytes=-N`) stays intact when it fits in one slice, which
+  # keeps a moov atom at the end of the file reachable.
+  defp clamp_range(start_pos, end_pos, _size) do
+    {start_pos, min(end_pos, start_pos + @range_chunk_bytes - 1)}
   end
 
   defp parse_range([], _size), do: :no_range

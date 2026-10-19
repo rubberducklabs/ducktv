@@ -57,10 +57,13 @@ defmodule TvplayerWeb.RecordingController do
     path = Recording.dvrfile_path(recording)
     content_type = content_type_for(filename)
 
-    case Client.stream_dvrfile(path, conn,
-           filename: filename,
-           content_type: content_type
-         ) do
+    opts = [
+      filename: filename,
+      content_type: content_type,
+      content_length: recording.filesize
+    ]
+
+    case Client.stream_dvrfile(path, conn, opts) do
       {:ok, conn} ->
         conn
 
