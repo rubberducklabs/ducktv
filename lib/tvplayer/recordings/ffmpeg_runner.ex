@@ -105,6 +105,13 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
       "-loglevel",
       "warning",
       "-y",
+      # Decoder threads. A lone -threads after -c:a binds to AAC only;
+      # libx264 then treats thread count 0 as "every core".
+      "-threads",
+      threads,
+      # yadif/scale default to one thread per CPU when this is unset.
+      "-filter_threads",
+      threads,
       "-probesize",
       "10M",
       "-analyzeduration",
@@ -128,7 +135,11 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
       "-pix_fmt",
       "yuv420p",
       "-crf",
-      crf
+      crf,
+      "-threads:v",
+      threads,
+      "-x264-params",
+      "threads=#{threads}:lookahead_threads=1"
     ] ++
       video_filters ++
       [
@@ -142,8 +153,6 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
         "48000",
         "-movflags",
         "+faststart",
-        "-threads",
-        threads,
         "-progress",
         "pipe:1",
         "-nostats",
@@ -209,7 +218,8 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
       "starting recording transcode for #{opts.uuid} " <>
         "(codec=#{probe.video_codec || "unknown"} " <>
         "field_order=#{probe.field_order || "unknown"} " <>
-        "deint=#{Probe.interlaced?(probe)})"
+        "deint=#{Probe.interlaced?(probe)} " <>
+        "threads=#{Keyword.get(config, :threads, 4)})"
     )
 
     port =

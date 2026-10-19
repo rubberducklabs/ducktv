@@ -217,8 +217,13 @@ defmodule Tvplayer.Recordings.FFmpegRunnerTest do
 
     args = FFmpegRunner.build_args(opts, [threads: 4, crf: 23, preset: "veryfast"], probe)
 
-    assert "-threads" in args
-    assert "4" in args
+    input_at = Enum.find_index(args, &(&1 == "-i"))
+    threads_at = Enum.find_index(args, &(&1 == "-threads"))
+    assert threads_at < input_at
+    assert Enum.at(args, threads_at + 1) == "4"
+    assert Enum.at(args, Enum.find_index(args, &(&1 == "-filter_threads")) + 1) == "4"
+    assert Enum.at(args, Enum.find_index(args, &(&1 == "-threads:v")) + 1) == "4"
+    assert "threads=4:lookahead_threads=1" in args
     assert "-crf" in args
     assert "23" in args
     assert "+faststart" in args
