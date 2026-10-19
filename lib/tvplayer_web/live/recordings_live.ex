@@ -763,8 +763,6 @@ defmodule TvplayerWeb.RecordingsLive do
     |> Calendar.strftime("%Y-%m-%dT%H:%M")
   end
 
-  defp format_time(nil), do: nil
-
   defp format_time(%DateTime{} = dt) do
     dt
     |> DateTime.shift_zone!(@timezone)

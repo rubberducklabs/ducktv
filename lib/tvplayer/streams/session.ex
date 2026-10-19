@@ -5,8 +5,6 @@ defmodule Tvplayer.Streams.Session do
 
   use GenServer
 
-  require Logger
-
   alias Tvplayer.Streams.Probe
   alias Tvplayer.Tvheadend.Client
 
