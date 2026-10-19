@@ -17,6 +17,10 @@ services:
     volumes:
       - hls-data:/data/hls
       - transcode-data:/data/transcodes
+      # Optional: mount TVHeadend's recordings read-only so originals are
+      # served from disk (sendfile + resumable Range) instead of proxied.
+      # Also set RECORDINGS_ROOT=/recordings and TVHEADEND_RECORDINGS_ROOT.
+      # - /mnt/user/recordings:/recordings:ro
     environment:
       PHX_SERVER: "true"
       PORT: ${PORT:-4000}
@@ -52,6 +56,8 @@ services:
       TRANSCODE_PRESET: ${TRANSCODE_PRESET:-veryfast}
       TRANSCODE_CRF: ${TRANSCODE_CRF:-23}
       TRANSCODE_AUDIO_BITRATE: ${TRANSCODE_AUDIO_BITRATE:-160k}
+      RECORDINGS_ROOT: ${RECORDINGS_ROOT:-}
+      TVHEADEND_RECORDINGS_ROOT: ${TVHEADEND_RECORDINGS_ROOT:-}
 
 volumes:
   hls-data:

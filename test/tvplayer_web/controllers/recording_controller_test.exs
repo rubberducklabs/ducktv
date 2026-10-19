@@ -192,6 +192,47 @@ defmodule TvplayerWeb.RecordingControllerTest do
     assert conn.resp_body == "full-media"
   end
 
+  describe "original download from a mounted recordings directory" do
+    setup do
+      root =
+        Path.join(System.tmp_dir!(), "tvplayer-recordings-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(root)
+      File.write!(Path.join(root, "ZIB.ts"), "local-mpegts-bytes")
+
+      previous = Application.get_env(:tvplayer, :recording_files)
+      Application.put_env(:tvplayer, :recording_files, local_root: root, tvheadend_root: "/video")
+
+      on_exit(fn ->
+        Application.put_env(:tvplayer, :recording_files, previous || [])
+        File.rm_rf!(root)
+      end)
+
+      :ok
+    end
+
+    test "sends the file from disk with range support", %{conn: conn} do
+      conn = get(conn, ~p"/recordings/rec-done/download")
+
+      assert conn.status == 200
+      assert get_resp_header(conn, "accept-ranges") == ["bytes"]
+      assert get_resp_header(conn, "content-type") == ["video/mp2t"]
+      assert get_resp_header(conn, "content-disposition") == [~s(attachment; filename="ZIB.ts")]
+      assert conn.resp_body == "local-mpegts-bytes"
+    end
+
+    test "resumes an open-ended range without a slice cap", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("range", "bytes=6-")
+        |> get(~p"/recordings/rec-done/download")
+
+      assert conn.status == 206
+      assert get_resp_header(conn, "content-range") == ["bytes 6-17/18"]
+      assert conn.resp_body == "mpegts-bytes"
+    end
+  end
+
   test "returns 404 for non-downloadable recording", %{conn: conn} do
     conn = get(conn, ~p"/recordings/rec-scheduled/download")
     assert conn.status == 404

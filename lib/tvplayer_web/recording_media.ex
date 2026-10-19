@@ -17,21 +17,34 @@ defmodule TvplayerWeb.RecordingMedia do
   Streams an MP4 inline with HTTP Range support (for in-browser playback).
   """
   def serve_inline(conn, path, filename) when is_binary(path) and is_binary(filename) do
+    serve(conn, path, filename, "video/mp4", "inline", @range_chunk_bytes)
+  end
+
+  @doc """
+  Sends a file as a download attachment via `sendfile`, with HTTP Range
+  support so downloads can resume or be fetched in parallel segments.
+  """
+  def serve_attachment(conn, path, filename, content_type \\ "video/mp4")
+      when is_binary(path) and is_binary(filename) do
+    serve(conn, path, filename, content_type, "attachment", nil)
+  end
+
+  defp serve(conn, path, filename, content_type, disposition, max_slice) do
     %{size: size} = File.stat!(path)
 
     conn =
       conn
-      |> put_resp_content_type("video/mp4", nil)
+      |> put_resp_content_type(content_type, nil)
       |> put_resp_header("accept-ranges", "bytes")
       |> put_resp_header("cache-control", "private, no-transform")
       |> put_resp_header(
         "content-disposition",
-        ~s(inline; filename="#{escape_disposition(filename)}")
+        ~s(#{disposition}; filename="#{escape_disposition(filename)}")
       )
 
     case parse_range(get_req_header(conn, "range"), size) do
       {:ok, start_pos, end_pos} ->
-        {start_pos, end_pos} = clamp_range(start_pos, end_pos, size)
+        end_pos = clamp_end(start_pos, end_pos, max_slice)
         length = end_pos - start_pos + 1
 
         conn
@@ -51,27 +64,13 @@ defmodule TvplayerWeb.RecordingMedia do
     end
   end
 
-  @doc """
-  Streams an MP4 as a download attachment.
-  """
-  def serve_attachment(conn, path, filename) when is_binary(path) and is_binary(filename) do
-    conn
-    |> put_resp_content_type("video/mp4", nil)
-    |> put_resp_header(
-      "content-disposition",
-      ~s(attachment; filename="#{escape_disposition(filename)}")
-    )
-    |> send_file(200, path)
-  end
-
   # Cap every read at one slice that starts where the client asked. Players
   # continue and seek with open-ended ranges (`bytes=N-`); those already end
   # at EOF, so snapping them to the file tail would return the wrong bytes.
   # A short suffix (`bytes=-N`) stays intact when it fits in one slice, which
   # keeps a moov atom at the end of the file reachable.
-  defp clamp_range(start_pos, end_pos, _size) do
-    {start_pos, min(end_pos, start_pos + @range_chunk_bytes - 1)}
-  end
+  defp clamp_end(_start_pos, end_pos, nil), do: end_pos
+  defp clamp_end(start_pos, end_pos, max_slice), do: min(end_pos, start_pos + max_slice - 1)
 
   defp parse_range([], _size), do: :no_range
 

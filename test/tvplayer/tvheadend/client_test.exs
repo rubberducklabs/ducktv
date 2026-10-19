@@ -275,6 +275,39 @@ defmodule Tvplayer.Tvheadend.ClientTest do
     assert Plug.Conn.get_resp_header(conn, "content-length") == ["#{byte_size(body)}"]
   end
 
+  test "stream_dvrfile forwards Range and passes the partial response through" do
+    slice = "0123456789"
+
+    {stub, port} =
+      start_dvr_stub(206, slice, "video/mp2t",
+        notify: self(),
+        headers: [{"content-range", "bytes 100-109/6777466928"}, {"accept-ranges", "bytes"}]
+      )
+
+    on_exit(fn -> stop_dvr_stub(stub) end)
+
+    conn = Plug.Test.conn(:get, "/recordings/rec-1/download")
+
+    assert {:ok, conn} =
+             Client.stream_dvrfile("/dvrfile/rec-1", conn,
+               url: "http://127.0.0.1:#{port}",
+               username: "u",
+               password: "p",
+               filename: "ZIB.ts",
+               content_length: 6_777_466_928,
+               range: "bytes=100-109"
+             )
+
+    assert_receive {:dvr_request, request}
+    assert request =~ ~r/^range: bytes=100-109\r$/mi
+
+    assert conn.status == 206
+    assert conn.resp_body == slice
+    assert Plug.Conn.get_resp_header(conn, "content-length") == ["10"]
+    assert Plug.Conn.get_resp_header(conn, "content-range") == ["bytes 100-109/6777466928"]
+    assert Plug.Conn.get_resp_header(conn, "accept-ranges") == ["bytes"]
+  end
+
   test "stream_dvrfile live path returns http_error without sending a body" do
     {stub, port} = start_dvr_stub(404, "missing", "text/plain")
     on_exit(fn -> stop_dvr_stub(stub) end)
@@ -328,8 +361,18 @@ defmodule Tvplayer.Tvheadend.ClientTest do
   defp stub_loop(listen, status, body, content_type, opts) do
     case :gen_tcp.accept(listen, 5_000) do
       {:ok, socket} ->
-        _ = drain_http_request(socket)
-        reason = if status == 200, do: "OK", else: "Error"
+        request = drain_http_request(socket)
+
+        if notify = Keyword.get(opts, :notify) do
+          send(notify, {:dvr_request, request})
+        end
+
+        reason = if status in 200..299, do: "OK", else: "Error"
+
+        extra_headers =
+          opts
+          |> Keyword.get(:headers, [])
+          |> Enum.map_join(fn {name, value} -> "#{name}: #{value}\r\n" end)
 
         length_header =
           if Keyword.get(opts, :content_length, true) do
@@ -342,6 +385,7 @@ defmodule Tvplayer.Tvheadend.ClientTest do
           "HTTP/1.1 #{status} #{reason}\r\n" <>
             "content-type: #{content_type}\r\n" <>
             length_header <>
+            extra_headers <>
             "connection: close\r\n" <>
             "\r\n" <> body
 
@@ -361,11 +405,11 @@ defmodule Tvplayer.Tvheadend.ClientTest do
 
   defp drain_http_request(socket, acc) do
     if String.contains?(acc, "\r\n\r\n") do
-      :ok
+      acc
     else
       case :gen_tcp.recv(socket, 0, 2_000) do
         {:ok, data} -> drain_http_request(socket, acc <> data)
-        {:error, _} -> :ok
+        {:error, _} -> acc
       end
     end
   end

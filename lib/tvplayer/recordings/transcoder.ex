@@ -10,7 +10,7 @@ defmodule Tvplayer.Recordings.Transcoder do
 
   require Logger
 
-  alias Tvplayer.Recordings.FFmpegRunner
+  alias Tvplayer.Recordings.{FFmpegRunner, LocalFile}
   alias Tvplayer.Tvheadend.{Cache, Client, Recording}
 
   @topic "transcodes"
@@ -262,7 +262,13 @@ defmodule Tvplayer.Recordings.Transcoder do
   defp do_start(state, %Recording{} = recording) do
     config = config()
     runner = Keyword.get(config, :runner, FFmpegRunner)
-    input_url = Client.dvrfile_url(recording)
+
+    input_url =
+      case LocalFile.path(recording) do
+        {:ok, path} -> path
+        :error -> Client.dvrfile_url(recording)
+      end
+
     # Prefer schedule duration for progress (instant). Optional ffprobe is slow
     # over HTTP and blocked the LiveView when done inside GenServer.call.
     duration_ms = schedule_duration_ms(recording)

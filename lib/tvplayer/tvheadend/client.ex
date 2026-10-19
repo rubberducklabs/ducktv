@@ -268,11 +268,18 @@ defmodule Tvplayer.Tvheadend.Client do
     disposition = ~s(attachment; filename="#{escape_disposition(filename)}")
     content_length = positive_length(Keyword.get(opts, :content_length))
 
+    headers =
+      case Keyword.get(opts, :range) do
+        "bytes=" <> _ = range -> [{"range", range}]
+        _ -> []
+      end
+
     case Keyword.get(opts, :plug) || config[:plug] do
       nil ->
         stream_dvrfile_live(
           url,
           auth,
+          headers,
           conn,
           content_type,
           disposition,
@@ -284,6 +291,7 @@ defmodule Tvplayer.Tvheadend.Client do
         stream_dvrfile_buffered(
           url,
           auth,
+          headers,
           plug,
           conn,
           content_type,
@@ -298,6 +306,7 @@ defmodule Tvplayer.Tvheadend.Client do
   defp stream_dvrfile_buffered(
          url,
          auth,
+         headers,
          plug,
          conn,
          content_type,
@@ -307,6 +316,7 @@ defmodule Tvplayer.Tvheadend.Client do
        ) do
     case Req.get(url,
            auth: auth,
+           headers: headers,
            plug: plug,
            decode_body: false,
            receive_timeout: receive_timeout,
@@ -318,12 +328,13 @@ defmodule Tvplayer.Tvheadend.Client do
 
         length =
           parse_content_length(header_value(headers, "content-length")) ||
-            content_length || byte_size(body)
+            full_length(status, content_length) || byte_size(body)
 
         conn =
           conn
           |> put_download_headers(disposition, type, length)
-          |> Plug.Conn.send_chunked(200)
+          |> put_range_headers(headers)
+          |> Plug.Conn.send_chunked(status)
 
         chunk_body(body, conn)
 
@@ -345,9 +356,18 @@ defmodule Tvplayer.Tvheadend.Client do
   # (Bandit requires Plug.Conn.chunk/2 to run in the stream owner). The next
   # TVH chunk is only read after the previous one is written to the browser.
   # HTTP/1 is required — Finch HTTP/2 streaming has no backpressure.
+  #
+  # Passive `recv(socket, 0)` returns at most the inet driver's user-level
+  # `buffer` (~9 KB by default), so a multi-GB file becomes hundreds of
+  # thousands of read/write round trips. A 1 MiB buffer lets each read take
+  # everything the kernel has queued, roughly 10x fewer round trips.
+  # `recbuf` stays unset so Linux keeps TCP receive-window autotuning.
+  @dvr_read_buffer 1024 * 1024
+
   defp stream_dvrfile_live(
          url,
          auth,
+         headers,
          conn,
          content_type,
          disposition,
@@ -369,12 +389,14 @@ defmodule Tvplayer.Tvheadend.Client do
       result =
         Req.get(url,
           auth: auth,
+          headers: headers,
           into: fn {:data, chunk}, acc -> stream_dvr_chunk(chunk, acc, key) end,
           decode_body: false,
           receive_timeout: receive_timeout,
           connect_options: [
             timeout: connect_timeout(receive_timeout),
-            protocols: [:http1]
+            protocols: [:http1],
+            transport_opts: [buffer: @dvr_read_buffer]
           ],
           retry: false
         )
@@ -426,14 +448,29 @@ defmodule Tvplayer.Tvheadend.Client do
     type = header_value(resp.headers, "content-type") || state.content_type
 
     length =
-      parse_content_length(header_value(resp.headers, "content-length")) || state.content_length
+      parse_content_length(header_value(resp.headers, "content-length")) ||
+        full_length(resp.status, state.content_length)
 
     conn =
       state.conn
       |> put_download_headers(state.disposition, type, length)
-      |> Plug.Conn.send_chunked(200)
+      |> put_range_headers(resp.headers)
+      |> Plug.Conn.send_chunked(resp.status)
 
     {:ok, %{state | conn: conn, started?: true}}
+  end
+
+  # The recording size only describes a full (200) body, never a 206 slice.
+  defp full_length(200, content_length), do: content_length
+  defp full_length(_status, _content_length), do: nil
+
+  defp put_range_headers(conn, upstream_headers) do
+    Enum.reduce(["accept-ranges", "content-range"], conn, fn name, conn ->
+      case header_value(upstream_headers, name) do
+        nil -> conn
+        value -> Plug.Conn.put_resp_header(conn, name, value)
+      end
+    end)
   end
 
   defp finish_dvr_stream(result, key) do

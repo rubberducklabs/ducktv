@@ -3,7 +3,7 @@ defmodule TvplayerWeb.RecordingController do
 
   require Logger
 
-  alias Tvplayer.Recordings.Transcoder
+  alias Tvplayer.Recordings.{LocalFile, Transcoder}
   alias Tvplayer.Tvheadend.{Cache, Client, Recording}
   alias TvplayerWeb.RecordingMedia
 
@@ -54,18 +54,28 @@ defmodule TvplayerWeb.RecordingController do
 
   defp stream_original(conn, %Recording{} = recording) do
     filename = Recording.download_filename(recording)
-    path = Recording.dvrfile_path(recording)
     content_type = content_type_for(filename)
 
+    case LocalFile.path(recording) do
+      {:ok, path} -> RecordingMedia.serve_attachment(conn, path, filename, content_type)
+      :error -> proxy_original(conn, recording, filename, content_type)
+    end
+  end
+
+  defp proxy_original(conn, %Recording{} = recording, filename, content_type) do
     opts = [
       filename: filename,
       content_type: content_type,
-      content_length: recording.filesize
+      content_length: recording.filesize,
+      range: conn |> get_req_header("range") |> List.first()
     ]
 
-    case Client.stream_dvrfile(path, conn, opts) do
+    case Client.stream_dvrfile(Recording.dvrfile_path(recording), conn, opts) do
       {:ok, conn} ->
         conn
+
+      {:error, {:http_error, 416}} ->
+        maybe_error_resp(conn, 416, "Range Not Satisfiable")
 
       {:error, {:http_error, status}} ->
         Logger.warning("DVR download failed for #{recording.uuid}: HTTP #{status}")

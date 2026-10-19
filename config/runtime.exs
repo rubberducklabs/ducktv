@@ -98,6 +98,10 @@ if config_env() != :test do
       crf: String.to_integer(System.get_env("TRANSCODE_CRF", "23")),
       audio_bitrate: System.get_env("TRANSCODE_AUDIO_BITRATE", "160k"),
       runner: Tvplayer.Recordings.FFmpegRunner
+    ],
+    recording_files: [
+      local_root: System.get_env("RECORDINGS_ROOT"),
+      tvheadend_root: System.get_env("TVHEADEND_RECORDINGS_ROOT")
     ]
 end
 
