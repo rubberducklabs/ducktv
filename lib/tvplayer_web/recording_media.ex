@@ -3,22 +3,7 @@ defmodule TvplayerWeb.RecordingMedia do
 
   import Plug.Conn
 
-  # Browsers open playback with `Range: bytes=0-`, which means "the rest of
-  # the file". Answering that with a multi-GB MP4 makes the player buffer the
-  # whole recording before it will play. Each response is capped so playback
-  # starts from the first slice and the browser asks for the next slice as
-  # the playhead moves.
-  @range_chunk_bytes 8 * 1024 * 1024
-
-  @doc false
-  def range_chunk_bytes, do: @range_chunk_bytes
-
-  @doc """
-  Streams an MP4 inline with HTTP Range support (for in-browser playback).
-  """
-  def serve_inline(conn, path, filename) when is_binary(path) and is_binary(filename) do
-    serve(conn, path, filename, "video/mp4", "inline", @range_chunk_bytes)
-  end
+  alias TvplayerWeb.FileSender
 
   @doc """
   Sends a file as a download attachment via `sendfile`, with HTTP Range
@@ -26,10 +11,10 @@ defmodule TvplayerWeb.RecordingMedia do
   """
   def serve_attachment(conn, path, filename, content_type \\ "video/mp4")
       when is_binary(path) and is_binary(filename) do
-    serve(conn, path, filename, content_type, "attachment", nil)
+    serve(conn, path, filename, content_type, "attachment")
   end
 
-  defp serve(conn, path, filename, content_type, disposition, max_slice) do
+  defp serve(conn, path, filename, content_type, disposition) do
     %{size: size} = File.stat!(path)
 
     conn =
@@ -44,18 +29,17 @@ defmodule TvplayerWeb.RecordingMedia do
 
     case parse_range(get_req_header(conn, "range"), size) do
       {:ok, start_pos, end_pos} ->
-        end_pos = clamp_end(start_pos, end_pos, max_slice)
         length = end_pos - start_pos + 1
 
         conn
         |> put_resp_header("content-range", "bytes #{start_pos}-#{end_pos}/#{size}")
         |> put_resp_header("content-length", Integer.to_string(length))
-        |> send_file(206, path, start_pos, length)
+        |> FileSender.send_file(206, path, start_pos, length)
 
       :no_range ->
         conn
         |> put_resp_header("content-length", Integer.to_string(size))
-        |> send_file(200, path)
+        |> FileSender.send_file(200, path)
 
       :invalid ->
         conn
@@ -63,14 +47,6 @@ defmodule TvplayerWeb.RecordingMedia do
         |> send_resp(416, "Range Not Satisfiable")
     end
   end
-
-  # Cap every read at one slice that starts where the client asked. Players
-  # continue and seek with open-ended ranges (`bytes=N-`); those already end
-  # at EOF, so snapping them to the file tail would return the wrong bytes.
-  # A short suffix (`bytes=-N`) stays intact when it fits in one slice, which
-  # keeps a moov atom at the end of the file reachable.
-  defp clamp_end(_start_pos, end_pos, nil), do: end_pos
-  defp clamp_end(start_pos, end_pos, max_slice), do: min(end_pos, start_pos + max_slice - 1)
 
   defp parse_range([], _size), do: :no_range
 

@@ -48,8 +48,7 @@ defmodule TvplayerWeb.SharedRecordingLive do
               id={"shared-video-#{@recording.uuid}"}
               class="tv-cinema-video"
               playsinline
-              preload="metadata"
-              src={~p"/share/#{@token}/media"}
+              data-playlist={~p"/share/#{@token}/hls/index.m3u8"}
             ></video>
 
             <div class="tv-player-ui" data-player-ui>

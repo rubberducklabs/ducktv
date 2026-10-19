@@ -14,6 +14,7 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
 
   require Logger
 
+  alias Tvplayer.Recordings.Hls
   alias Tvplayer.Streams.FFmpeg, as: StreamsFFmpeg
   alias Tvplayer.Streams.Probe
   alias Tvplayer.Streams.Probe.Result
@@ -139,7 +140,13 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
       "-threads:v",
       threads,
       "-x264-params",
-      "threads=#{threads}:lookahead_threads=1"
+      "threads=#{threads}:lookahead_threads=1",
+      # A keyframe every 2s, same as live TV. The web player cuts this file
+      # into ~4s HLS segments and can only start a segment on a keyframe.
+      "-sc_threshold",
+      "0",
+      "-force_key_frames",
+      "expr:gte(t,n_forced*2)"
     ] ++
       video_filters ++
       [
@@ -366,10 +373,20 @@ defmodule Tvplayer.Recordings.FFmpegRunner do
     |> max(0)
   end
 
-  defp finalize(%{part_path: part, output_path: output}) do
-    if File.exists?(part) and File.stat!(part).size > 0 do
-      File.rename!(part, output)
-      :ok
+  defp finalize(state) do
+    if File.exists?(state.part_path) and File.stat!(state.part_path).size > 0 do
+      File.rename!(state.part_path, state.output_path)
+
+      # The MP4 is the download. Playback wants HLS; a failed segment pass
+      # must not throw away a finished encode, since playback retries it.
+      case Hls.ensure(state.uuid) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("recording hls failed for #{state.uuid}: #{inspect(reason)}")
+          :ok
+      end
     else
       {:error, :empty_output}
     end

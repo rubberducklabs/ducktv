@@ -10,7 +10,7 @@ defmodule Tvplayer.Recordings.Transcoder do
 
   require Logger
 
-  alias Tvplayer.Recordings.{FFmpegRunner, LocalFile}
+  alias Tvplayer.Recordings.{FFmpegRunner, Hls, LocalFile}
   alias Tvplayer.Tvheadend.{Cache, Client, Recording}
 
   @topic "transcodes"
@@ -121,6 +121,7 @@ defmodule Tvplayer.Recordings.Transcoder do
     state = do_cancel(state, uuid)
     _ = File.rm(output_path(uuid))
     _ = File.rm(part_path(uuid))
+    _ = Hls.remove(uuid)
     state = put_in(state.statuses, Map.delete(state.statuses, uuid))
     broadcast(uuid, nil)
     {:reply, :ok, state, {:continue, :maybe_start}}

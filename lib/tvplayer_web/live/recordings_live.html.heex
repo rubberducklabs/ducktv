@@ -731,8 +731,7 @@
           id={"recording-video-#{@playing_uuid}"}
           class="tv-cinema-video"
           playsinline
-          preload="metadata"
-          src={~p"/recordings/#{@playing_uuid}/media"}
+          data-playlist={~p"/recordings/#{@playing_uuid}/hls/index.m3u8"}
         ></video>
 
         <div class="tv-player-ui" data-player-ui>

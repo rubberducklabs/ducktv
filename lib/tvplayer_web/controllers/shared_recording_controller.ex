@@ -3,11 +3,11 @@ defmodule TvplayerWeb.SharedRecordingController do
 
   alias Tvplayer.Recordings.{ShareLink, Transcoder}
   alias Tvplayer.Tvheadend.{Cache, Recording}
-  alias TvplayerWeb.RecordingMedia
+  alias TvplayerWeb.{RecordingHls, RecordingMedia}
 
-  def media(conn, %{"token" => token}) do
-    with {:ok, recording, path} <- load_shared(token) do
-      RecordingMedia.serve_inline(conn, path, Recording.web_download_filename(recording))
+  def hls(conn, %{"token" => token, "file" => file}) do
+    with {:ok, recording, _path} <- load_shared(token) do
+      RecordingHls.serve(conn, recording.uuid, file)
     else
       {:error, status, message} -> send_resp(conn, status, message)
     end

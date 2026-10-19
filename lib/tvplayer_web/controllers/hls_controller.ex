@@ -1,6 +1,8 @@
 defmodule TvplayerWeb.HLSController do
   use TvplayerWeb, :controller
 
+  alias TvplayerWeb.FileSender
+
   def show(conn, %{"channel_uuid" => channel_uuid, "file" => file}) do
     with :ok <- validate_uuid(channel_uuid),
          :ok <- validate_file(file),
@@ -9,7 +11,7 @@ defmodule TvplayerWeb.HLSController do
       conn
       |> put_resp_content_type(content_type(file))
       |> put_resp_header("cache-control", cache_control(file))
-      |> send_file(200, path)
+      |> FileSender.send_file(200, path)
     else
       _ ->
         send_resp(conn, 404, "Not found")

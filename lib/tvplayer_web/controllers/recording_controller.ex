@@ -5,7 +5,7 @@ defmodule TvplayerWeb.RecordingController do
 
   alias Tvplayer.Recordings.{LocalFile, Transcoder}
   alias Tvplayer.Tvheadend.{Cache, Client, Recording}
-  alias TvplayerWeb.RecordingMedia
+  alias TvplayerWeb.{RecordingHls, RecordingMedia}
 
   def download(conn, %{"uuid" => uuid} = params) do
     variant = Map.get(params, "variant", "original")
@@ -26,13 +26,11 @@ defmodule TvplayerWeb.RecordingController do
     end
   end
 
-  def media(conn, %{"uuid" => uuid}) do
+  def hls(conn, %{"uuid" => uuid, "file" => file}) do
     case Cache.recording(uuid) do
       %Recording{} = recording ->
-        path = Transcoder.output_path(uuid)
-
-        if Recording.downloadable?(recording) and File.exists?(path) do
-          RecordingMedia.serve_inline(conn, path, Recording.web_download_filename(recording))
+        if Recording.downloadable?(recording) do
+          RecordingHls.serve(conn, uuid, file)
         else
           send_resp(conn, 404, "Web-Version nicht verfügbar")
         end

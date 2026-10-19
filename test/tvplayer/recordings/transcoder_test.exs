@@ -227,6 +227,8 @@ defmodule Tvplayer.Recordings.FFmpegRunnerTest do
     assert "-crf" in args
     assert "23" in args
     assert "+faststart" in args
+    assert "expr:gte(t,n_forced*2)" in args
+    assert Enum.at(args, Enum.find_index(args, &(&1 == "-sc_threshold")) + 1) == "0"
     assert "pipe:1" in args
     assert "-f" in args
     assert "mp4" in args

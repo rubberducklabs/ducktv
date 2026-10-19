@@ -22,6 +22,20 @@ defmodule TvplayerWeb.Router do
     plug :require_authenticated_media
   end
 
+  # No `:accepts` here. Players ask for the playlist, the init segment and the
+  # media segments with different Accept headers, and a miss is a 406 that
+  # looks like a broken player. Guests get 401 rather than the HTML login page.
+  pipeline :recording_hls do
+    plug :fetch_session
+    plug :put_secure_browser_headers
+    plug :require_authenticated_media
+  end
+
+  pipeline :public_hls do
+    plug :fetch_session
+    plug :put_secure_browser_headers
+  end
+
   scope "/", TvplayerWeb do
     pipe_through :browser
 
@@ -31,8 +45,13 @@ defmodule TvplayerWeb.Router do
     post "/logout", SessionController, :delete
 
     live "/share/:token", SharedRecordingLive
-    get "/share/:token/media", SharedRecordingController, :media
     get "/share/:token/download", SharedRecordingController, :download
+  end
+
+  scope "/", TvplayerWeb do
+    pipe_through :public_hls
+
+    get "/share/:token/hls/:file", SharedRecordingController, :hls
   end
 
   scope "/", TvplayerWeb do
@@ -46,8 +65,13 @@ defmodule TvplayerWeb.Router do
     end
 
     get "/recordings/:uuid/download", RecordingController, :download
-    get "/recordings/:uuid/media", RecordingController, :media
     get "/icons/*path", IconController, :show
+  end
+
+  scope "/", TvplayerWeb do
+    pipe_through :recording_hls
+
+    get "/recordings/:uuid/hls/:file", RecordingController, :hls
   end
 
   scope "/", TvplayerWeb do

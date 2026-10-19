@@ -113,59 +113,42 @@ defmodule TvplayerWeb.RecordingControllerTest do
     assert conn.status == 404
   end
 
-  test "serves media with range support", %{conn: conn} do
+  test "serves the hls playlist and a segment", %{conn: conn} do
     path = Transcoder.output_path("rec-done")
     File.mkdir_p!(Path.dirname(path))
-    File.write!(path, "0123456789")
+    File.write!(path, "web-mp4")
 
-    conn =
-      conn
-      |> put_req_header("range", "bytes=2-5")
-      |> get(~p"/recordings/rec-done/media")
+    dir = Tvplayer.Recordings.Hls.dir("rec-done")
+    File.mkdir_p!(dir)
+    File.write!(Path.join(dir, "index.m3u8"), "#EXTM3U\nseg_00000.m4s\n")
+    File.write!(Path.join(dir, "seg_00000.m4s"), "segment-bytes")
 
-    assert conn.status == 206
-    assert get_resp_header(conn, "accept-ranges") == ["bytes"]
-    assert get_resp_header(conn, "content-range") == ["bytes 2-5/10"]
-    assert conn.resp_body == "2345"
+    playlist = get(conn, ~p"/recordings/rec-done/hls/index.m3u8")
+    assert playlist.status == 200
+    assert get_resp_header(playlist, "content-type") == ["application/vnd.apple.mpegurl"]
+    assert playlist.resp_body =~ "seg_00000.m4s"
+
+    segment = get(conn, ~p"/recordings/rec-done/hls/seg_00000.m4s")
+    assert segment.status == 200
+    assert get_resp_header(segment, "content-type") == ["video/iso.segment"]
+    assert segment.resp_body == "segment-bytes"
   end
 
-  test "open-ended range returns one slice so playback can start", %{conn: conn} do
+  test "rejects hls files outside the playlist", %{conn: conn} do
     path = Transcoder.output_path("rec-done")
     File.mkdir_p!(Path.dirname(path))
-    chunk = TvplayerWeb.RecordingMedia.range_chunk_bytes()
-    size = chunk + 100
-    File.write!(path, :binary.copy(<<0>>, size))
+    File.write!(path, "web-mp4")
 
-    conn =
-      conn
-      |> put_req_header("range", "bytes=0-")
-      |> get(~p"/recordings/rec-done/media")
-
-    assert conn.status == 206
-    assert get_resp_header(conn, "content-range") == ["bytes 0-#{chunk - 1}/#{size}"]
-    assert get_resp_header(conn, "content-length") == ["#{chunk}"]
-    assert byte_size(conn.resp_body) == chunk
-    assert get_resp_header(conn, "content-type") == ["video/mp4"]
+    conn = get(conn, ~p"/recordings/rec-done/hls/other.mp4")
+    assert conn.status == 404
   end
 
-  test "open-ended range continues from the requested offset", %{conn: conn} do
-    path = Transcoder.output_path("rec-done")
-    File.mkdir_p!(Path.dirname(path))
-    chunk = TvplayerWeb.RecordingMedia.range_chunk_bytes()
-    size = chunk * 3
-    File.write!(path, :binary.copy(<<0>>, size))
-
-    conn =
-      conn
-      |> put_req_header("range", "bytes=#{chunk}-")
-      |> get(~p"/recordings/rec-done/media")
-
-    assert conn.status == 206
-    assert get_resp_header(conn, "content-range") == ["bytes #{chunk}-#{chunk * 2 - 1}/#{size}"]
-    assert byte_size(conn.resp_body) == chunk
+  test "returns 404 for hls when the web version is missing", %{conn: conn} do
+    conn = get(conn, ~p"/recordings/rec-done/hls/index.m3u8")
+    assert conn.status == 404
   end
 
-  test "short suffix range keeps the end of the file", %{conn: conn} do
+  test "resumes a compressed download from a byte range", %{conn: conn} do
     path = Transcoder.output_path("rec-done")
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, String.duplicate("a", 100) <> "TAIL")
@@ -173,23 +156,11 @@ defmodule TvplayerWeb.RecordingControllerTest do
     conn =
       conn
       |> put_req_header("range", "bytes=-4")
-      |> get(~p"/recordings/rec-done/media")
+      |> get(~p"/recordings/rec-done/download?variant=compressed")
 
     assert conn.status == 206
     assert get_resp_header(conn, "content-range") == ["bytes 100-103/104"]
     assert conn.resp_body == "TAIL"
-  end
-
-  test "serves full media when no range header", %{conn: conn} do
-    path = Transcoder.output_path("rec-done")
-    File.mkdir_p!(Path.dirname(path))
-    File.write!(path, "full-media")
-
-    conn = get(conn, ~p"/recordings/rec-done/media")
-
-    assert conn.status == 200
-    assert get_resp_header(conn, "accept-ranges") == ["bytes"]
-    assert conn.resp_body == "full-media"
   end
 
   describe "original download from a mounted recordings directory" do

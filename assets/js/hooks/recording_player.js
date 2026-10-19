@@ -1,3 +1,5 @@
+import Hls from "../../vendor/hls.js"
+
 const SKIP_SECONDS = 10
 
 function formatTime(seconds) {
@@ -42,7 +44,7 @@ export const RecordingPlayer = {
     this.stage = this.el
 
     this.bindControls()
-    this.tryPlay()
+    this.attachPlaylist()
     this.syncUi()
     this.syncProgress()
     this.el.focus({ preventScroll: true })
@@ -54,6 +56,56 @@ export const RecordingPlayer = {
     this.clearHideTimer()
     document.removeEventListener("keydown", this.boundKeydown)
     document.removeEventListener("fullscreenchange", this.boundFullscreen)
+    this.destroyPlayer()
+  },
+
+  attachPlaylist() {
+    const url = this.video?.dataset.playlist
+    if (!url) return
+
+    if (Hls.isSupported()) {
+      this.hls = new Hls({
+        enableWorker: true,
+        // VOD: start at the first segment and keep a short buffer.
+        maxBufferLength: 30,
+        backBufferLength: 60,
+        xhrSetup: (xhr) => {
+          xhr.withCredentials = true
+        }
+      })
+      this.hls.loadSource(url)
+      this.hls.attachMedia(this.video)
+      this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        this.syncProgress()
+        this.tryPlay()
+      })
+      this.hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return
+
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          this.hls.startLoad()
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          this.hls.recoverMediaError()
+        }
+      })
+    } else if (this.video.canPlayType("application/vnd.apple.mpegurl")) {
+      this.video.src = url
+      this.video.addEventListener(
+        "loadedmetadata",
+        () => {
+          this.syncProgress()
+          this.tryPlay()
+        },
+        { once: true }
+      )
+    }
+  },
+
+  destroyPlayer() {
+    if (this.hls) {
+      this.hls.destroy()
+      this.hls = null
+    }
   },
 
   bindControls() {

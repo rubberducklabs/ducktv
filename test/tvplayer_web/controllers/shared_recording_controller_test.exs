@@ -45,17 +45,21 @@ defmodule TvplayerWeb.SharedRecordingControllerTest do
     :ok
   end
 
-  test "serves shared media for valid token when web version exists", %{conn: conn} do
+  test "serves shared hls for valid token when web version exists", %{conn: conn} do
     path = Transcoder.output_path("rec-done")
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, "shared-mp4-bytes")
 
+    dir = Tvplayer.Recordings.Hls.dir("rec-done")
+    File.mkdir_p!(dir)
+    File.write!(Path.join(dir, "index.m3u8"), "#EXTM3U\n")
+
     token = ShareLink.sign("rec-done")
-    conn = get(conn, ~p"/share/#{token}/media")
+    conn = get(conn, ~p"/share/#{token}/hls/index.m3u8")
 
     assert conn.status == 200
-    assert get_resp_header(conn, "content-type") == ["video/mp4"]
-    assert conn.resp_body == "shared-mp4-bytes"
+    assert get_resp_header(conn, "content-type") == ["application/vnd.apple.mpegurl"]
+    assert conn.resp_body =~ "#EXTM3U"
   end
 
   test "downloads shared web version for valid token", %{conn: conn} do
@@ -76,13 +80,13 @@ defmodule TvplayerWeb.SharedRecordingControllerTest do
   end
 
   test "rejects invalid share token", %{conn: conn} do
-    conn = get(conn, ~p"/share/not-a-real-token/media")
+    conn = get(conn, ~p"/share/not-a-real-token/hls/index.m3u8")
     assert conn.status == 404
   end
 
   test "rejects valid token when web version missing", %{conn: conn} do
     token = ShareLink.sign("rec-done")
-    conn = get(conn, ~p"/share/#{token}/media")
+    conn = get(conn, ~p"/share/#{token}/hls/index.m3u8")
     assert conn.status == 404
   end
 end
